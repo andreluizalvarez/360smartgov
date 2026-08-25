@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SmartGov 360 | Plataforma de Ocorrências Municipais</title>
+    <meta name="description" content="Aplicação completa para cadastro de ocorrências urbanas e painel administrativo do município." />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="hero">
+      <nav class="nav container">
+        <a class="brand" href="#home">SmartGov 360</a>
+        <div class="nav-links">
+          <a href="#home">Início</a>
+          <a href="#registro">Registrar problema</a>
+          <a href="login.html">Painel administrativo</a>
+        </div>
+      </nav>
+
+      <div class="container hero-content" id="home">
+        <div>
+          <p class="eyebrow">Cidade inteligente</p>
+          <h1>Uma aplicação completa para transformar a comunicação entre a população e o município.</h1>
+          <p class="lead">
+            O cidadão registra problemas urbanos com foto, endereço e descrição. O administrador
+            acompanha o status, prioriza demandas e acompanha a solução em tempo real.
+          </p>
+          <div class="hero-actions">
+            <a class="btn btn-primary" href="#registro">Cadastrar ocorrência</a>
+            <a class="btn btn-secondary" href="login.html">Acessar painel</a>
+          </div>
+        </div>
+
+        <div class="hero-card" id="registro">
+          <div class="section-heading">
+            <p class="eyebrow">Registro do cidadão</p>
+            <h2>Relate um problema identificado</h2>
+            <p>Preencha os dados abaixo para registrar a ocorrência e encaminhar para a equipe responsável.</p>
+          </div>
+
+          <form id="occurrence-form" class="form-grid">
+            <div class="field">
+              <label for="name">Nome</label>
+              <input id="name" name="name" required placeholder="Seu nome" />
+            </div>
+            <div class="field">
+              <label for="email">E-mail</label>
+              <input id="email" name="email" type="email" required placeholder="seu@email.com" />
+            </div>
+            <div class="field">
+              <label for="phone">Telefone</label>
+              <input id="phone" name="phone" placeholder="(11) 99999-9999" />
+            </div>
+            <div class="field full">
+              <label for="photo">Foto (obrigatória)</label>
+              <input id="photo" name="photo" type="file" accept="image/*" required />
+            </div>
+            <div class="field full">
+              <label>Localização</label>
+              <div class="radio-group">
+                <label class="radio-option">
+                  <input type="radio" id="location-geo" name="location-mode" value="geolocation" checked>
+                  Usar minha localização
+                </label>
+                <label class="radio-option">
+                  <input type="radio" id="location-manual" name="location-mode" value="manual">
+                  Preencher endereço manualmente
+                </label>
+              </div>
+              <span id="geo-message" class="form-message" aria-live="polite"></span>
+            </div>
+            <div id="address-fields" style="display:none;">
+              <div class="field">
+                <label for="cep">CEP</label>
+                <input id="cep" name="cep" placeholder="00000-000" />
+              </div>
+              <div class="field">
+                <label for="street">Logradouro</label>
+                <input id="street" name="street" placeholder="Rua" />
+              </div>
+              <div class="field">
+                <label for="number">Número</label>
+                <input id="number" name="number" placeholder="Número" />
+              </div>
+              <div class="field">
+                <label for="neighborhood">Bairro</label>
+                <input id="neighborhood" name="neighborhood" placeholder="Bairro" />
+              </div>
+              <div class="field">
+                <label for="city">Cidade</label>
+                <input id="city" name="city" placeholder="Cidade" />
+              </div>
+              <div class="field">
+                <label for="state">Estado</label>
+                <input id="state" name="state" placeholder="UF" />
+              </div>
+              <div id="cep-message" class="form-message" role="status" aria-live="polite"></div>
+            </div>
+            <input type="hidden" id="category" name="category" value="" />
+            <input type="hidden" id="priority" name="priority" value="" />
+            <div id="details-fields" style="display:none;">
+              <div class="field full">
+                <label for="title">Resumo do problema</label>
+                <input id="title" name="title" placeholder="Ex.: Poste com lâmpada apagada" />
+              </div>
+              <div class="field full">
+                <label for="description">Descrição</label>
+                <textarea id="description" name="description" rows="4" placeholder="Descreva o problema com detalhes e localização aproximada"></textarea>
+              </div>
+            </div>
+            <div class="field full submit-wrapper">
+              <button id="submit-button" class="btn btn-secondary" type="submit">Enviar ocorrência</button>
+              <span id="submit-loading" class="loading-indicator hidden">Aguarde, carregando...</span>
+            </div>
+          </form>
+
+          <div id="form-message" class="form-message" role="status" aria-live="polite"></div>
+
+          <!-- debug button removed -->
+        </div>
+      </div>
+    </header>
+
+    <footer class="footer">
+      <div class="container footer-content">
+        <p>SmartGov 360 — Aplicação demonstrativa de gestão municipal</p>
+        <p>© <span id="year"></span></p>
+      </div>
+    </footer>
+
+    <script src="script.js"></script>
+  </body>
+</html>

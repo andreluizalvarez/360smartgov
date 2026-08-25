@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Login Administrativo | SmartGov 360</title>
+    <meta name="description" content="Página de login administrativo para SmartGov 360." />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="hero">
+      <nav class="nav container">
+        <a class="brand" href="index.html">SmartGov 360</a>
+        <div class="nav-links">
+          <a href="index.html">Início</a>
+          <a href="login.html">Login</a>
+        </div>
+      </nav>
+
+      <div class="container hero-content" id="home">
+        <div>
+          <p class="eyebrow">Acesso Administrativo</p>
+          <h1>Entrar no painel de gestão</h1>
+          <p class="lead">
+            Faça login para acessar o painel de ocorrências, acompanhar status e priorizar atendimentos.
+          </p>
+        </div>
+      </div>
+    </header>
+
+    <main class="container app-shell">
+      <section class="panel">
+        <div class="section-heading">
+          <p class="eyebrow">Painel administrativo</p>
+          <h2>Login administrativo</h2>
+          <p>Use as credenciais de demonstração para acessar a área de gestão.</p>
+        </div>
+
+        <div class="admin-box" id="admin-login">
+          <h3>Login administrativo</h3>
+          <form id="login-form" class="form-grid compact">
+            <div class="field">
+              <label for="username">Usuário</label>
+              <input id="username" name="username" required placeholder="admin" />
+            </div>
+            <div class="field">
+              <label for="password">Senha</label>
+              <input id="password" name="password" type="password" required placeholder="admin123" />
+            </div>
+            <div class="field full">
+              <button class="btn btn-secondary" type="submit">Entrar</button>
+            </div>
+          </form>
+          <p class="hint">Credenciais de demonstração: admin / admin123</p>
+          <div id="login-message" class="form-message"></div>
+        </div>
+
+        <div id="admin-dashboard" class="panel hidden">
+          <div class="section-heading">
+            <p class="eyebrow">Painel administrativo</p>
+          </div>
+
+          <div class="admin-tabs">
+            <div class="tab-buttons" role="tablist" aria-label="Admin tabs">
+              <button id="tab-occurrences" class="tab-button active" role="tab" aria-selected="true">Ocorrências</button>
+              <button id="tab-categories" class="tab-button" role="tab">Categorias</button>
+              <button id="tab-priorities" class="tab-button" role="tab">Prioridades</button>
+              <button id="tab-users" class="tab-button" role="tab">Usuários</button>
+            </div>
+          </div>
+
+          <div id="panel-occurrences" class="tab-panel">
+            <div class="stats">
+              <div>Total: <strong id="total-count">0</strong></div>
+              <div>Em análise: <strong id="pending-count">0</strong></div>
+              <div>Em andamento: <strong id="progress-count">0</strong></div>
+              <div>Resolvido: <strong id="resolved-count">0</strong></div>
+            </div>
+
+            <div id="map" class="admin-map"></div>
+
+            <div class="table-wrap">
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th>Resumo / Descrição</th>
+                    <th>Categoria</th>
+                    <th>Prioridade</th>
+                    <th>Status</th>
+                    <th>Atualização da equipe</th>
+                    <th>Ações</th>
+                  </tr>
+                </thead>
+                <tbody id="incident-list">
+                  <!-- preenchido por script.js -->
+                </tbody>
+              </table>
+            </div>
+
+            <div id="incident-detail-panel" class="tab-panel hidden" aria-hidden="true">
+              <div class="section-heading">
+                <p class="eyebrow">Detalhes da ocorrência</p>
+                <h3 id="detail-title">Carregando...</h3>
+              </div>
+              <div class="preview-image-wrap">
+                <img id="detail-image" class="preview-image" alt="Foto da ocorrência" src="" />
+              </div>
+              <div class="preview-details">
+                <p><strong>Categoria:</strong> <span id="detail-category"></span></p>
+                <p><strong>Prioridade:</strong> <span id="detail-priority"></span></p>
+                <p><strong>Nome:</strong> <span id="detail-name"></span></p>
+                <p><strong>E-mail:</strong> <span id="detail-email"></span></p>
+                <p><strong>Endereço:</strong> <span id="detail-address"></span></p>
+                <p><strong>Telefone:</strong> <span id="detail-phone"></span></p>
+                <p><strong>Descrição:</strong></p>
+                <p id="detail-description"></p>
+                <p><strong>Atualização da equipe:</strong></p>
+                <p id="detail-work-update"></p>
+                <p><strong>Última atualização por:</strong> <span id="detail-work-meta"></span></p>
+                <p><strong>Histórico:</strong></p>
+                <ul id="detail-work-history" class="work-history-list"></ul>
+              </div>
+              <div style="margin-top:12px; display:flex; gap:8px;">
+                <button id="detail-close" class="btn">Fechar</button>
+              </div>
+            </div>
+          </div>
+
+          <div id="panel-categories" class="tab-panel hidden">
+            <h3>Gerenciar categorias</h3>
+            <div class="form-grid compact">
+              <div class="field">
+                <label for="new-category">Nova categoria</label>
+                <input id="new-category" placeholder="Ex.: iluminação pública" />
+                <button id="add-category-btn" type="button" class="btn btn-primary">Adicionar categoria</button>
+              </div>
+            </div>
+            <div class="field full">
+              <p class="preview-label">Categorias atuais</p>
+              <ul id="category-list" class="admin-list"></ul>
+            </div>
+          </div>
+
+          <div id="panel-priorities" class="tab-panel hidden">
+            <h3>Gerenciar prioridades</h3>
+            <div class="form-grid compact">
+              <div class="field">
+                <label for="new-priority">Nova prioridade</label>
+                <input id="new-priority" placeholder="Ex.: Urgente" />
+                <button id="add-priority-btn" type="button" class="btn btn-primary">Adicionar prioridade</button>
+              </div>
+            </div>
+            <div class="field full">
+              <p class="preview-label">Prioridades atuais</p>
+              <ul id="priority-list" class="admin-list"></ul>
+            </div>
+          </div>
+
+          <div id="panel-users" class="tab-panel hidden">
+            <h3>Gerenciar usuários administradores</h3>
+            <form id="admin-user-form" class="form-grid compact">
+              <div class="field">
+                <label for="new-admin-username">Usuário</label>
+                <input id="new-admin-username" placeholder="Ex.: joao.admin" required />
+              </div>
+              <div class="field">
+                <label for="new-admin-password">Senha</label>
+                <input id="new-admin-password" type="password" placeholder="Defina uma senha" required />
+              </div>
+              <div class="field full">
+                <label for="new-admin-role">Perfil</label>
+                <select id="new-admin-role">
+                  <option value="category_admin">Administrador por categoria</option>
+                  <option value="system_admin">Administrador do sistema</option>
+                </select>
+              </div>
+              <div id="user-categories-wrap" class="field full">
+                <p class="preview-label">Categorias visíveis para este usuário</p>
+                <div id="user-category-access" class="radio-group"></div>
+              </div>
+              <div class="field full" style="display:flex; gap:8px;">
+                <button id="create-admin-user-btn" type="submit" class="btn btn-primary">Cadastrar usuário</button>
+                <button id="cancel-edit-user-btn" type="button" class="btn" style="display:none;">Cancelar edição</button>
+              </div>
+            </form>
+            <div class="field full">
+              <p class="preview-label">Usuários cadastrados</p>
+              <ul id="admin-users-list" class="admin-list"></ul>
+            </div>
+          </div>
+
+          <div style="margin-top:16px; display:flex; gap:10px; flex-wrap:wrap;">
+            <button id="clear-incidents-btn" class="btn btn-danger" type="button">Limpar ocorrências</button>
+            <button id="logout-btn" class="btn">Sair</button>
+          </div>
+          <div id="admin-message" class="form-message" role="status" aria-live="polite"></div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <div class="container footer-content">
+        <p>SmartGov 360 — Aplicação demonstrativa de gestão municipal</p>
+        <p>© <span id="year"></span></p>
+      </div>
+    </footer>
+
+    <script src="script.js"></script>
+    <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyBG8dQ387nVgYJGCBBzU35b6n5lugYe9KU&callback=onGoogleMapsLoaded" async defer></script>
+  </body>
+</html>

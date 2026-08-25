@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Prévia da Ocorrência | SmartGov 360</title>
+    <meta name="description" content="Prévia da ocorrência enviada pelo cidadão antes de chegar ao painel administrativo." />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="hero">
+      <nav class="nav container">
+        <a class="brand" href="index.html">SmartGov 360</a>
+        <div class="nav-links">
+          <a href="index.html">Início</a>
+        </div>
+      </nav>
+      <div class="container hero-content" id="home">
+        <div>
+          <p class="eyebrow">Prévia da ocorrência</p>
+          <h1>Confira como a ocorrência será apresentada ao administrador</h1>
+          <p class="lead">
+            Revise os dados preenchidos e confirme o envio para o painel de gestão municipal.
+          </p>
+        </div>
+      </div>
+    </header>
+
+    <main class="container app-shell">
+      <section class="hero-card preview-card">
+        <div class="section-heading">
+          <p class="eyebrow">Resumo da ocorrência</p>
+          <h2 id="preview-title">Carregando...</h2>
+        </div>
+
+        <div class="preview-image-wrap">
+          <img id="preview-image" class="preview-image" alt="Imagem da ocorrência" src="" />
+        </div>
+
+        <form id="preview-form" class="preview-details">
+          <div class="field">
+            <label for="preview-title-input">Resumo do problema</label>
+            <input id="preview-title-input" name="title" disabled />
+          </div>
+          <div class="field">
+            <label for="preview-category-input">Categoria</label>
+            <input id="preview-category-input" name="category" disabled />
+          </div>
+          <div class="field">
+            <label for="preview-priority-input">Prioridade</label>
+            <input id="preview-priority-input" name="priority" disabled />
+          </div>
+          <div class="field">
+            <label for="preview-name-input">Nome</label>
+            <input id="preview-name-input" name="name" disabled />
+          </div>
+          <div class="field">
+            <label for="preview-email-input">E-mail</label>
+            <input id="preview-email-input" name="email" type="email" disabled />
+          </div>
+          <div class="field">
+            <label for="preview-phone-input">Telefone</label>
+            <input id="preview-phone-input" name="phone" disabled />
+          </div>
+          <div class="field">
+            <label for="preview-address-input">Endereço</label>
+            <input id="preview-address-input" name="address" disabled />
+          </div>
+          <div class="field full">
+            <label for="preview-description-input">Descrição</label>
+            <textarea id="preview-description-input" name="description" rows="5" disabled></textarea>
+          </div>
+        </form>
+
+        <div class="preview-actions">
+          <button id="confirm-send" class="btn btn-primary">Confirmar envio</button>
+          <button id="edit-send" class="btn btn-secondary">Editar</button>
+          <button id="cancel-send" class="btn btn-danger">Cancelar ocorrência</button>
+        </div>
+
+        <div id="preview-message" class="form-message" role="status" aria-live="polite"></div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <div class="container footer-content">
+        <p>SmartGov 360 — Aplicação demonstrativa de gestão municipal</p>
+        <p>© <span id="year"></span></p>
+      </div>
+    </footer>
+
+    <script src="preview.js"></script>
+  </body>
+</html>

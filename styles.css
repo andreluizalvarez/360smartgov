@@ -1,0 +1,620 @@
+:root {
+  color-scheme: light;
+  --bg: #f7fbf6;
+  --bg-soft: #eef8f0;
+  --panel: rgba(255, 255, 255, 0.96);
+  --text: #12323f;
+  --muted: #4f6470;
+  --accent: #f0b92f;
+  --accent-2: #2e9e62;
+  --danger: #c94b4b;
+  --border: rgba(18, 50, 63, 0.12);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+  position: relative;
+  background:
+    radial-gradient(circle at top left, rgba(240, 185, 47, 0.24), transparent 28%),
+    radial-gradient(circle at bottom right, rgba(46, 158, 98, 0.18), transparent 30%),
+    linear-gradient(135deg, #f8fdf8 0%, #eef8f0 45%, #f5f9eb 100%);
+  color: var(--text);
+  line-height: 1.6;
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background-image: url("brasao-municipio.png");
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: min(72vmin, 780px);
+  opacity: 0.16;
+  pointer-events: none;
+  z-index: 0;
+}
+
+body > * {
+  position: relative;
+  z-index: 1;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+.container {
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  padding: 0 1.5rem;
+}
+
+.hero {
+  padding-bottom: 3rem;
+}
+
+.nav {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1.25rem 1.5rem;
+}
+
+.brand {
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--text);
+  text-decoration: none;
+  text-transform: uppercase;
+}
+
+.nav-links {
+  display: flex;
+  gap: 1.25rem;
+}
+
+.nav-links a {
+  color: var(--muted);
+  text-decoration: none;
+}
+
+.nav-links a:hover {
+  color: var(--text);
+}
+
+.hero-content {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1.5rem;
+  align-items: start;
+  padding-top: 1rem;
+  max-width: none;
+}
+
+.radio-group {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.radio-option {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.9rem 1rem;
+  background: #f5fbf2;
+  border: 1px solid rgba(46, 158, 98, 0.14);
+  border-radius: 14px;
+  cursor: pointer;
+}
+
+.radio-option input {
+  accent-color: var(--accent-2);
+}
+
+.hero-card {
+  background: #ffffff;
+  color: #102b33;
+  border: 1px solid rgba(46, 158, 98, 0.18);
+  border-radius: 24px;
+  padding: 1.25rem;
+  box-shadow: 0 14px 30px rgba(46, 158, 98, 0.12);
+  width: 100%;
+  max-width: none;
+  margin: 0;
+}
+
+.eyebrow {
+  text-transform: uppercase;
+  letter-spacing: 0.24em;
+  font-size: 0.8rem;
+  color: #2e9e62;
+  margin-bottom: 0.7rem;
+  font-weight: 700;
+}
+
+h1,
+h2,
+h3 {
+  line-height: 1.15;
+}
+
+h1 {
+  font-size: clamp(2rem, 3.4vw, 3.4rem);
+  margin: 0 0 1rem;
+}
+
+h2 {
+  font-size: clamp(1.5rem, 2.2vw, 2.1rem);
+  margin: 0 0 0.5rem;
+}
+
+.lead,
+.section-heading p {
+  color: var(--muted);
+}
+
+.hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin-top: 1.5rem;
+}
+
+.btn {
+  display: inline-block;
+  border: 0;
+  border-radius: 999px;
+  padding: 0.9rem 1.2rem;
+  text-decoration: none;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.btn-primary {
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+
+#occurrence-form .btn-primary,
+#registro a.btn-primary {
+  background: linear-gradient(90deg, #f0b92f 0%, #2e9e62 100%);
+  color: #103447;
+  box-shadow: 0 8px 18px rgba(46, 158, 98, 0.2);
+}
+
+.btn-secondary {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text);
+}
+
+.btn-danger {
+  background: #f2d0d0;
+  border: 1px solid #d46a6a;
+  color: #8b2a2a;
+}
+
+.preview-details input,
+.preview-details textarea {
+  width: 100%;
+  border: 1px solid var(--border);
+  background: #f7f7f7;
+  border-radius: 14px;
+  padding: 0.9rem 1rem;
+  color: var(--text);
+  font: inherit;
+}
+
+.preview-details input:disabled,
+.preview-details textarea:disabled {
+  opacity: 1;
+}
+
+.preview-details.editing input,
+.preview-details.editing textarea {
+  background: #ffffff;
+  border-color: rgba(46, 158, 98, 0.25);
+}
+
+/* Admin tabs */
+.admin-tabs {
+  background: transparent;
+  border: none;
+  padding: 0;
+}
+
+.admin-tabs .tab-buttons {
+  display: flex;
+  gap: 0.5rem;
+  margin: 0 0 1rem 0;
+}
+
+.tab-button {
+  padding: 0.5rem 0.9rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: transparent;
+  cursor: pointer;
+}
+
+.tab-button.active {
+  background: #f4f6f8;
+  color: #1e2a33;
+  border-color: rgba(18, 50, 63, 0.16);
+}
+
+.tab-panel {
+  padding: 0.8rem 0.6rem;
+  border-radius: 12px;
+  background: rgba(255,255,255,0.8);
+  border: 1px solid var(--border);
+}
+
+.admin-list .admin-list-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.5rem 0.6rem;
+  border-bottom: 1px solid rgba(18,50,63,0.04);
+}
+
+.admin-list .item-actions button {
+  margin-left: 0.5rem;
+}
+
+.edit-input {
+  width: 60%;
+  padding: 0.5rem;
+  border-radius: 8px;
+}
+
+.hero-card {
+  background: #ffffff;
+  color: #102b33;
+  border: 1px solid rgba(46, 158, 98, 0.18);
+  border-radius: 24px;
+  padding: 1.25rem;
+  box-shadow: 0 14px 30px rgba(46, 158, 98, 0.12);
+  width: 100%;
+  margin: 0;
+}
+
+/* Make the registration form inside #registro use available width */
+#registro .form-grid {
+  grid-template-columns: 1fr;
+  gap: 0.9rem;
+}
+
+#registro .field.full,
+#registro .field {
+  width: 100%;
+}
+
+/* Make submit button full width inside registro */
+#registro .btn-secondary {
+  width: 100%;
+  padding: 0.85rem 1rem;
+}
+
+/* Ensure file input uses full width */
+#registro input[type="file"] {
+  width: 100%;
+}
+
+.hero-card h3 {
+  color: #1f6b39;
+  margin-bottom: 0.9rem;
+}
+
+.preview-card {
+  max-width: 900px;
+  margin: 0 auto;
+}
+
+.preview-image-wrap {
+  margin: 1rem 0;
+  text-align: center;
+}
+
+.preview-image {
+  width: 100%;
+  max-width: 780px;
+  border-radius: 22px;
+  border: 1px solid rgba(18, 50, 63, 0.08);
+  object-fit: cover;
+}
+
+.preview-details {
+  display: grid;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.preview-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.preview-label {
+  font-weight: 700;
+  color: #2e9e62;
+  margin-bottom: 0.25rem;
+}
+
+.preview-actions {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-top: 1.5rem;
+}
+
+.admin-map {
+  width: 100%;
+  min-height: 320px;
+  border-radius: 18px;
+  border: 1px solid rgba(18, 50, 63, 0.12);
+  margin-bottom: 1rem;
+}
+
+.hero-card ul {
+  color: #1a4f33;
+}
+
+.hero-card li {
+  margin-bottom: 0.55rem;
+}
+
+.hero-card ul li::marker {
+  color: #1f6b39;
+}
+
+.panel,
+.admin-box,
+.stat-card {
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.97), rgba(242, 248, 238, 0.96));
+  border: 1px solid rgba(46, 158, 98, 0.14);
+  border-radius: 24px;
+  padding: 1.25rem;
+  box-shadow: 0 16px 36px rgba(18, 50, 63, 0.08);
+}
+
+.panel h2,
+.panel h3,
+.admin-box h3 {
+  color: #2e9e62;
+}
+
+.app-shell {
+  display: grid;
+  gap: 1.5rem;
+  padding: 1rem 0 3rem;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1.25rem;
+  align-items: start;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.field.full {
+  grid-column: 1 / -1;
+}
+
+label {
+  font-weight: 600;
+}
+
+input,
+select,
+textarea {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text);
+  padding: 0.8rem 0.9rem;
+  font: inherit;
+}
+
+input[type="file"] {
+  padding: 0.45rem 0.6rem;
+}
+
+textarea {
+  resize: vertical;
+}
+
+.form-message {
+  margin-top: 0.6rem;
+  min-height: 1.2rem;
+  color: var(--accent);
+}
+
+.submit-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.loading-indicator {
+  color: var(--primary);
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.form-message.error {
+  color: var(--danger);
+}
+
+.panel-admin {
+  display: grid;
+  gap: 1rem;
+}
+
+.admin-box {
+  margin-top: 0.5rem;
+}
+
+.compact {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.hint {
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
+.hidden {
+  display: none;
+}
+
+.dashboard-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1rem;
+  margin: 1rem 0;
+}
+
+.stat-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.stat-card strong {
+  font-size: 1.5rem;
+  color: var(--accent);
+}
+
+.table-wrap {
+  overflow-x: auto;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th,
+td {
+  padding: 0.9rem;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+}
+
+/* Make category and priority columns narrower */
+th:nth-child(2), th:nth-child(3) {
+  width: 130px;
+}
+
+td:nth-child(2), td:nth-child(3) {
+  vertical-align: middle;
+}
+
+th {
+  color: var(--accent);
+}
+
+.status-badge {
+  display: inline-block;
+  padding: 0.25rem 0.6rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  font-size: 0.9rem;
+}
+
+select.status-select {
+  min-width: 140px;
+}
+
+.work-update-input {
+  width: 100%;
+  min-width: 220px;
+  min-height: 88px;
+  resize: vertical;
+  margin-bottom: 0.55rem;
+}
+
+.save-work-update-btn {
+  width: 100%;
+}
+
+.work-history-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 0.7rem;
+}
+
+.work-history-list li {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.7);
+  padding: 0.6rem 0.75rem;
+}
+
+/* Form adjustments for small screens */
+@media (max-width: 860px) {
+  .form-grid {
+    grid-template-columns: 1fr;
+  }
+  input[type="file"] {
+    width: 100%;
+  }
+}
+
+.footer {
+  padding: 0 0 2rem;
+  color: var(--muted);
+}
+
+.footer-content {
+  border-top: 1px solid var(--border);
+  padding-top: 1rem;
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 860px) {
+  .hero-content,
+  .form-grid,
+  .stats-grid,
+  .compact {
+    grid-template-columns: 1fr;
+  }
+
+  .nav-links {
+    display: none;
+  }
+
+  .dashboard-actions {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}

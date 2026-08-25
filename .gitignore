@@ -1,0 +1,17 @@
+# Dependencias
+node_modules/
+
+# Variaveis de ambiente (contem chaves de API e senhas)
+.env
+
+# Arquivos de sistema
+nul
+Thumbs.db
+.DS_Store
+
+# Editores e IDEs
+.vscode/
+.idea/
+
+# Scripts auxiliares locais
+gerar_planilha.py

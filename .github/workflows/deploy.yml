@@ -26,18 +26,34 @@ concurrency:
 jobs:
   publicar:
     # Em push, so publica se o CI passou. Em acionamento manual, publica direto.
-    # Fica inerte enquanto os secrets de SSH nao estiverem cadastrados.
-    if: |
-      (github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success')
-      && secrets.SSH_USER != '' && secrets.SSH_PRIVATE_KEY != ''
-      && secrets.APP_PATH != '' && secrets.RESTART_COMMAND != ''
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     environment: producao
 
     steps:
       - uses: actions/checkout@v4
 
+      # O contexto `secrets` nao existe no `if` de job, so dentro dos steps.
+      # Enquanto a configuracao nao estiver completa, o deploy e pulado sem falhar.
+      - name: Verificar se os secrets estao cadastrados
+        id: config
+        env:
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          APP_PATH: ${{ secrets.APP_PATH }}
+          RESTART_COMMAND: ${{ secrets.RESTART_COMMAND }}
+        run: |
+          if [ -z "$SSH_USER" ] || [ -z "$SSH_PRIVATE_KEY" ] || [ -z "$APP_PATH" ] || [ -z "$RESTART_COMMAND" ]; then
+            echo "pronto=false" >> "$GITHUB_OUTPUT"
+            echo "Secrets de SSH ainda nao cadastrados. Deploy pulado."
+            echo "Cadastre SSH_USER, SSH_PRIVATE_KEY, APP_PATH e RESTART_COMMAND"
+            echo "em Settings > Secrets and variables > Actions."
+          else
+            echo "pronto=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Preparar chave SSH
+        if: steps.config.outputs.pronto == 'true'
         env:
           SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
         run: |
@@ -48,6 +64,7 @@ jobs:
           cp .github/known_hosts ~/.ssh/known_hosts
 
       - name: Publicar no servidor
+        if: steps.config.outputs.pronto == 'true'
         env:
           SSH_HOST: ${{ vars.SSH_HOST || '104.248.54.178' }}
           SSH_PORT: ${{ vars.SSH_PORT || '22' }}
@@ -83,6 +100,7 @@ jobs:
           REMOTO
 
       - name: Confirmar que o site respondeu com a versao nova
+        if: steps.config.outputs.pronto == 'true'
         run: |
           echo "Aguardando o app reiniciar..."
           for i in $(seq 1 15); do

@@ -1,0 +1,96 @@
+# Publica no servidor de producao (www.360smartgov.com.br) a cada push no master.
+# Roda somente depois que o workflow CI passar.
+#
+# Secrets necessarios (Settings > Secrets and variables > Actions):
+#   SSH_USER         usuario do servidor (ex: root, deploy, ubuntu)
+#   SSH_PRIVATE_KEY  chave privada de deploy, conteudo completo do arquivo
+#   APP_PATH         pasta do app no servidor (ex: /var/www/360smartgov)
+#   RESTART_COMMAND  comando que reinicia o app (ex: pm2 restart smartgov360)
+# Variaveis opcionais (aba Variables):
+#   SSH_HOST         padrao 104.248.54.178
+#   SSH_PORT         padrao 22
+name: Deploy
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [master]
+  workflow_dispatch:
+
+# Evita dois deploys simultuaneos pisando um no outro.
+concurrency:
+  group: deploy-producao
+  cancel-in-progress: false
+
+jobs:
+  publicar:
+    # Em push, so publica se o CI passou. Em acionamento manual, publica direto.
+    # Fica inerte enquanto os secrets de SSH nao estiverem cadastrados.
+    if: |
+      (github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success')
+      && secrets.SSH_USER != '' && secrets.SSH_PRIVATE_KEY != ''
+      && secrets.APP_PATH != '' && secrets.RESTART_COMMAND != ''
+    runs-on: ubuntu-latest
+    environment: producao
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Preparar chave SSH
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          # Chaves de host fixadas no repositorio: sem TOFU, sem risco de MITM.
+          cp .github/known_hosts ~/.ssh/known_hosts
+
+      - name: Publicar no servidor
+        env:
+          SSH_HOST: ${{ vars.SSH_HOST || '104.248.54.178' }}
+          SSH_PORT: ${{ vars.SSH_PORT || '22' }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          APP_PATH: ${{ secrets.APP_PATH }}
+          RESTART_COMMAND: ${{ secrets.RESTART_COMMAND }}
+        run: |
+          ssh -i ~/.ssh/id_deploy -p "$SSH_PORT" \
+            -o BatchMode=yes -o StrictHostKeyChecking=yes \
+            "$SSH_USER@$SSH_HOST" \
+            "APP_PATH='$APP_PATH' RESTART_COMMAND='$RESTART_COMMAND' bash -s" <<'REMOTO'
+          set -euo pipefail
+
+          if [ ! -d "$APP_PATH/.git" ]; then
+            echo "ERRO: '$APP_PATH' nao e um repositorio git."
+            echo "Clone o projeto la uma vez: git clone https://github.com/andreluizalvarez/360smartgov.git \"$APP_PATH\""
+            exit 1
+          fi
+
+          cd "$APP_PATH"
+
+          echo "--- Versao atual: $(git rev-parse --short HEAD)"
+          git fetch origin master
+          # Descarta alteracoes locais no servidor: a fonte da verdade e o master.
+          # O .env nao e afetado por estar no .gitignore.
+          git reset --hard origin/master
+          echo "--- Nova versao:  $(git rev-parse --short HEAD)"
+
+          npm ci --omit=dev
+
+          echo "--- Reiniciando o app"
+          eval "$RESTART_COMMAND"
+          REMOTO
+
+      - name: Confirmar que o site respondeu com a versao nova
+        run: |
+          echo "Aguardando o app reiniciar..."
+          for i in $(seq 1 15); do
+            if curl -sf https://www.360smartgov.com.br/index.html | grep -q 'geo-permission-modal'; then
+              echo "OK: o site respondeu e ja contem a versao nova."
+              exit 0
+            fi
+            sleep 4
+          done
+          echo "O site respondeu, mas sem o conteudo esperado. Verifique os logs do app no servidor."
+          exit 1

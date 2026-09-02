@@ -43,6 +43,38 @@ npm start
 http://localhost:3000
 ```
 
+## Deploy automático (Render)
+
+O deploy é feito pelo Render a partir do branch `master`: **todo push publica uma nova versão**,
+sem passo manual. A configuração está em `render.yaml`.
+
+### Primeira configuração (uma vez só)
+
+1. Acesse <https://dashboard.render.com/blueprints> e clique em **New Blueprint Instance**.
+2. Conecte a conta do GitHub e selecione o repositório `360smartgov`.
+3. O Render lê o `render.yaml` e pede o valor de cada variável marcada como `sync: false`.
+   Preencha ao menos `OPENAI_API_KEY` — sem ela, a classificação por IA cai no
+   fallback "Outros / Média". As demais são opcionais e podem ficar em branco.
+4. Clique em **Apply**. O primeiro deploy leva alguns minutos.
+
+As chaves ficam apenas no painel do Render, nunca no repositório.
+
+### Depois disso
+
+```bash
+git push origin master   # o Render detecta e publica sozinho
+```
+
+Acompanhe em **Logs** e **Events** no painel do serviço.
+
+> No plano gratuito o serviço hiberna após ~15 minutos sem acesso; a primeira
+> requisição seguinte demora cerca de 50 segundos para responder.
+
+### Verificação automática
+
+O workflow `.github/workflows/ci.yml` roda a cada push: valida a sintaxe dos scripts
+e confirma que o servidor sobe e responde. Ele não faz o deploy — quem publica é o Render.
+
 ## Funcionalidades
 
 - front-end estático: `index.html`, `login.html`, `preview.html`, `styles.css`, `script.js`, `preview.js`

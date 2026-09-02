@@ -1,0 +1,45 @@
+# Valida o codigo a cada push. O deploy em si e feito pelo Render,
+# que observa o branch master via render.yaml (autoDeploy: true).
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  verificar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Validar sintaxe dos scripts
+        run: |
+          node --check server.js
+          node --check script.js
+          node --check preview.js
+
+      - name: Verificar se o servidor sobe
+        run: |
+          node server.js &
+          SERVER_PID=$!
+          for i in $(seq 1 20); do
+            if curl -sf http://127.0.0.1:3000/ > /dev/null; then
+              echo "Servidor respondeu na tentativa $i"
+              kill $SERVER_PID
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Servidor nao respondeu a tempo"
+          kill $SERVER_PID
+          exit 1

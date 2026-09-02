@@ -1,0 +1,6 @@
+# Normaliza finais de linha. Scripts executados no runner Linux do GitHub
+# Actions quebram se chegarem com CRLF.
+* text=auto eol=lf
+
+*.png binary
+*.xlsx binary

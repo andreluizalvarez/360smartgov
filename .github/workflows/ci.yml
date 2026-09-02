@@ -29,7 +29,9 @@ jobs:
           node --check preview.js
 
       - name: Testes de regressao
-        run: node testes/incidentes.test.js
+        run: |
+          node testes/incidentes.test.js
+          node testes/categorias.test.js
 
       - name: Verificar se o servidor sobe
         run: |

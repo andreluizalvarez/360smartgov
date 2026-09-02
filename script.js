@@ -1048,33 +1048,6 @@ function removeConfigItem(index, type) {
   }
 }
 
-function normalizeCategory(value) {
-  if (!value) return 'Outros';
-  const normalized = value.toString().toLowerCase();
-  if (normalized.includes('ilumina') || normalized.includes('lâmpada') || normalized.includes('luz')) return 'Iluminação pública';
-  if (normalized.includes('buraco')) return 'Buracos';
-  if (normalized.includes('árvore')) return 'Árvores caídas';
-  if (normalized.includes('descarte')) return 'Descarte irregular';
-  if (normalized.includes('boca de lobo')) return 'Boca de lobo entupida';
-  if (normalized.includes('semáforo') || normalized.includes('semaforo')) return 'Semáforo';
-  if (normalized.includes('sinalização')) return 'Sinalização';
-  if (normalized.includes('vazamento')) return 'Vazamentos';
-  if (normalized.includes('mato alto')) return 'Mato alto';
-  if (normalized.includes('animal')) return 'Animais mortos';
-  if (normalized.includes('dengue')) return 'Pontos de dengue';
-  if (normalized.includes('terreno abandonado')) return 'Terrenos abandonados';
-  if (normalized.includes('ônibus') || normalized.includes('onibus')) return 'Ônibus atrasado';
-  if (normalized.includes('acessibilidade')) return 'Acessibilidade';
-  if (normalized.includes('poda')) return 'Poda';
-  if (normalized.includes('limpeza')) return 'Limpeza urbana';
-  if (normalized.includes('praça') || normalized.includes('pracas')) return 'Danos em praças';
-  if (normalized.includes('escola')) return 'Danos em escolas';
-  if (normalized.includes('ubs')) return 'Danos em UBS';
-  if (normalized.includes('picha')) return 'Pichações';
-  if (normalized.includes('enchente')) return 'Enchentes';
-  return 'Outros';
-}
-
 function normalizePriority(value) {
   if (!value) return 'Média';
   const normalized = value.toString().toLowerCase();

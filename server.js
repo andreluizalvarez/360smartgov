@@ -60,17 +60,52 @@ function parseJsonFromText(text) {
   return JSON.parse(jsonMatch[0]);
 }
 
-function normalizeCategory(value) {
-  if (!value) return 'Outros';
-  const normalized = value.toString().toLowerCase();
-  if (normalized.includes('ilumina') || normalized.includes('lâmpada') || normalized.includes('luz')) return 'Iluminação pública';
-  if (normalized.includes('buraco')) return 'Buraco';
-  if (normalized.includes('árvore')) return 'Árvore caída';
-  if (normalized.includes('descarte')) return 'Descarte irregular';
-  if (normalized.includes('boca') || normalized.includes('lobo')) return 'Boca de lobo';
-  if (normalized.includes('vazamento')) return 'Vazamento';
-  if (normalized.includes('semáforo') || normalized.includes('semaforo')) return 'Semáforo';
-  if (normalized.includes('limpeza') || normalized.includes('lixo') || normalized.includes('varri')) return 'Limpeza urbana';
+// Minusculas, sem acento e sem espacos nas pontas, para comparar textos livres.
+function textoComparavel(valor) {
+  return (valor || '')
+    .toString()
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '');
+}
+
+// Remove o plural simples, para aproximar "buraco" de "buracos".
+function semPlural(palavra) {
+  return palavra.replace(/(oes|aes|ais|eis|ns|s)$/, '');
+}
+
+// A categoria devolvida pelo modelo e texto livre e precisa virar um item da
+// lista configurada — e ela que popula as permissoes de cada administrador.
+// Uma categoria fora da lista deixaria a ocorrencia invisivel para todos.
+function normalizeCategory(value, categorias) {
+  const lista = Array.isArray(categorias) && categorias.length ? categorias : DEFAULT_CATEGORIES;
+  const alvo = textoComparavel(value);
+  if (!alvo) return 'Outros';
+
+  // 1) Igual, ignorando caixa e acento.
+  const exata = lista.find((item) => textoComparavel(item) === alvo);
+  if (exata) return exata;
+
+  // 2) Um contem o outro: cobre "buraco" -> "buracos" e
+  //    "boca de lobo" -> "boca de lobo entupida".
+  const contida = lista.find((item) => {
+    const texto = textoComparavel(item);
+    return texto.includes(alvo) || alvo.includes(texto);
+  });
+  if (contida) return contida;
+
+  // 3) Palavra significativa em comum, ja sem plural:
+  //    "arvore caida" -> "arvores caidas".
+  const palavrasAlvo = alvo.split(/\s+/).filter((palavra) => palavra.length > 3).map(semPlural);
+  if (palavrasAlvo.length) {
+    const porPalavra = lista.find((item) => {
+      const palavrasItem = textoComparavel(item).split(/\s+/).filter((palavra) => palavra.length > 3).map(semPlural);
+      return palavrasItem.some((palavra) => palavrasAlvo.includes(palavra));
+    });
+    if (porPalavra) return porPalavra;
+  }
+
   return 'Outros';
 }
 
@@ -331,7 +366,7 @@ app.post('/api/classify', async (req, res) => {
     }
 
     return res.json({
-      category: normalizeCategory(parsed.category),
+      category: normalizeCategory(parsed.category, categoryList),
       priority: normalizePriority(parsed.priority),
       title: parsed.title || '',
       description: parsed.description || '',
@@ -430,7 +465,7 @@ app.post('/api/classify-image', upload.single('photo'), async (req, res) => {
     }
 
     return res.json({
-      category: normalizeCategory(parsed.category),
+      category: normalizeCategory(parsed.category, categories),
       priority: normalizePriority(parsed.priority),
       title: parsed.title || '',
       description: parsed.description || '',

@@ -32,6 +32,11 @@ const manualRadio = document.getElementById('location-manual');
 const addressFields = document.getElementById('address-fields');
 const detailsFields = document.getElementById('details-fields');
 const geoMessage = document.getElementById('geo-message');
+const geoModal = document.getElementById('geo-permission-modal');
+const geoModalSteps = document.getElementById('geo-modal-steps');
+const geoModalRetry = document.getElementById('geo-modal-retry');
+const geoModalManual = document.getElementById('geo-modal-manual');
+const geoModalMessage = document.getElementById('geo-modal-message');
 const loginForm = document.getElementById('login-form');
 const loginMessage = document.getElementById('login-message');
 const adminLogin = document.getElementById('admin-login');
@@ -1219,27 +1224,32 @@ async function classifyIncident(description, cep, street, number, neighborhood, 
   const priorities = getPriorityConfig();
   const payload = { description, cep, street, number, neighborhood, city, state, categories, priorities };
   console.debug('POST /api/classify payload:', payload);
-  const response = await fetch('/api/classify', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({ description, cep, street, number, neighborhood, city, state, categories, priorities })
-  });
+  try {
+    const response = await fetch('/api/classify', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ description, cep, street, number, neighborhood, city, state, categories, priorities })
+    });
 
-  if (!response.ok) {
+    if (!response.ok) {
+      return { category: 'Outros', priority: 'Média', title: '', description: '' };
+    }
+
+    const data = await response.json();
+    console.debug('Response from /api/classify:', data);
+    return {
+      category: data.category || 'Outros',
+      priority: data.priority || 'Média',
+      title: data.title || '',
+      description: data.description || '',
+      raw_model_text: data.raw_model_text || data.raw_text || ''
+    };
+  } catch (error) {
+    console.error('Falha ao classificar a ocorrência:', error);
     return { category: 'Outros', priority: 'Média', title: '', description: '' };
   }
-
-  const data = await response.json();
-  console.debug('Response from /api/classify:', data);
-  return {
-    category: data.category || 'Outros',
-    priority: data.priority || 'Média',
-    title: data.title || '',
-    description: data.description || '',
-    raw_model_text: data.raw_model_text || data.raw_text || ''
-  };
 }
 
 async function classifyImage(file) {
@@ -1286,29 +1296,44 @@ if (occurrenceForm) {
     let title = formData.get('title');
     const locationMode = formData.get('location-mode');
 
+    // A localização é resolvida antes do "Aguarde, carregando...": se o navegador
+    // estiver bloqueando, o popup de desbloqueio aparece sem a tela em estado de envio.
+    if (locationMode === 'geolocation') {
+      showMessage(formMessage, '', false);
+      const geoOk = await requestGeolocationPermission();
+      if (!geoOk) {
+        showMessage(
+          formMessage,
+          'Não foi possível usar sua localização. Preencha o endereço manualmente e envie novamente.',
+          true
+        );
+        return;
+      }
+    }
+
     if (submitButton) submitButton.disabled = true;
     if (submitLoading) submitLoading.classList.remove('hidden');
     showMessage(formMessage, 'Classificando a ocorrência...', false);
 
-    let classification = { category: 'Outros', priority: 'Média', title, description };
+    try {
+      let classification = { category: 'Outros', priority: 'Média', title, description };
 
-    if (locationMode === 'geolocation') {
-      await getGeolocationAddress();
-    }
+      let updatedFormData = new FormData(occurrenceForm);
+      const cep = updatedFormData.get('cep');
+      const street = updatedFormData.get('street');
+      const number = updatedFormData.get('number');
+      const neighborhood = updatedFormData.get('neighborhood');
+      const city = updatedFormData.get('city');
+      const state = updatedFormData.get('state');
+      description = updatedFormData.get('description');
+      title = updatedFormData.get('title');
 
-    let updatedFormData = new FormData(occurrenceForm);
-    const cep = updatedFormData.get('cep');
-    const street = updatedFormData.get('street');
-    const number = updatedFormData.get('number');
-    const neighborhood = updatedFormData.get('neighborhood');
-    const city = updatedFormData.get('city');
-    const state = updatedFormData.get('state');
-    description = updatedFormData.get('description');
-    title = updatedFormData.get('title');
+      const photoFile = photoInput?.files?.[0];
+      let imgResult = null;
+      if (photoFile) {
+        imgResult = await classifyImage(photoFile);
+      }
 
-    const photoFile = photoInput?.files?.[0];
-    if (photoFile) {
-      const imgResult = await classifyImage(photoFile);
       if (imgResult) {
         classification.category = imgResult.category || classification.category;
         classification.priority = imgResult.priority || classification.priority;
@@ -1328,72 +1353,67 @@ if (occurrenceForm) {
           description = textResult.description;
         }
       }
-    } else {
-      const textResult = await classifyIncident(description, cep, street, number, neighborhood, city, state);
-      classification = { ...classification, ...textResult };
-      if (textResult.title) {
-        title = textResult.title;
+
+      // clear hidden classification fields on form submit
+      if (categoryInput) categoryInput.value = '';
+      if (priorityInput) priorityInput.value = '';
+      if (categorySelect) categorySelect.value = '';
+      if (prioritySelect) prioritySelect.value = '';
+
+      // update title/description fields if the model provided new values
+      const titleField = document.getElementById('title');
+      const descField = document.getElementById('description');
+      if (titleField) titleField.value = title;
+      if (descField) descField.value = description;
+
+      let photoDataUrl = '';
+      if (photoFile) {
+        photoDataUrl = await readFileAsDataUrl(photoFile);
       }
-      if (textResult.description) {
-        description = textResult.description;
-      }
+
+      const updatedFormData2 = new FormData(occurrenceForm);
+      const name = updatedFormData2.get('name');
+      const email = updatedFormData2.get('email');
+      const phone = updatedFormData2.get('phone');
+
+      const incident = {
+        id: crypto.randomUUID(),
+        name,
+        email,
+        title,
+        category: classification.category,
+        priority: classification.priority,
+        description,
+        cep,
+        street,
+        number,
+        neighborhood,
+        city,
+        state,
+        phone,
+        photoDataUrl,
+        workUpdate: '',
+        workUpdatedBy: '',
+        workUpdatedAt: '',
+        latitude: sessionStorage.getItem('smartgov360-last-latitude') || '',
+        longitude: sessionStorage.getItem('smartgov360-last-longitude') || '',
+        status: 'Em análise',
+        createdAt: new Date().toISOString()
+      };
+
+      sessionStorage.setItem('smartgov360-preview-incident', JSON.stringify(incident));
+      window.location.href = 'preview.html';
+    } catch (error) {
+      console.error('Erro ao enviar a ocorrência:', error);
+      showMessage(
+        formMessage,
+        'Erro ao enviar a ocorrência. Verifique sua conexão e tente novamente.',
+        true
+      );
+    } finally {
+      resetSubmitState();
     }
-
-    // clear hidden classification fields on form submit
-    if (categoryInput) categoryInput.value = '';
-    if (priorityInput) priorityInput.value = '';
-    if (categorySelect) categorySelect.value = '';
-    if (prioritySelect) prioritySelect.value = '';
-
-    // update title/description fields if the model provided new values
-    const titleField = document.getElementById('title');
-    const descField = document.getElementById('description');
-    if (titleField) titleField.value = title;
-    if (descField) descField.value = description;
-
-    let photoDataUrl = '';
-    if (photoFile) {
-      photoDataUrl = await readFileAsDataUrl(photoFile);
-    }
-
-    const updatedFormData2 = new FormData(occurrenceForm);
-    const name = updatedFormData2.get('name');
-    const email = updatedFormData2.get('email');
-    const phone = updatedFormData2.get('phone');
-
-    const incident = {
-      id: crypto.randomUUID(),
-      name,
-      email,
-      title,
-      category: classification.category,
-      priority: classification.priority,
-      description,
-      cep,
-      street,
-      number,
-      neighborhood,
-      city,
-      state,
-      phone,
-      photoDataUrl,
-      workUpdate: '',
-      workUpdatedBy: '',
-      workUpdatedAt: '',
-      latitude: sessionStorage.getItem('smartgov360-last-latitude') || '',
-      longitude: sessionStorage.getItem('smartgov360-last-longitude') || '',
-      status: 'Em análise',
-      createdAt: new Date().toISOString()
-    };
-
-    sessionStorage.setItem('smartgov360-preview-incident', JSON.stringify(incident));
-    window.location.href = 'preview.html';
   });
-}
-
-function resetSubmitState() {
-  if (submitButton) submitButton.disabled = false;
-  if (submitLoading) submitLoading.classList.add('hidden');
 }
 
 function resetSubmitState() {
@@ -1674,7 +1694,7 @@ if (geoRadio) {
   geoRadio.addEventListener('change', async () => {
     updateAddressMode();
     if (geoRadio.checked) {
-      await getGeolocationAddress();
+      await requestGeolocationPermission();
     }
   });
 }
@@ -1683,22 +1703,266 @@ if (manualRadio) {
 }
 
 updateAddressMode();
+watchGeolocationPermission();
 
-async function getGeolocationAddress() {
-  if (!navigator.geolocation) {
-    if (geoMessage) geoMessage.textContent = 'Geolocalização não disponível neste navegador.';
-    return false;
+// Diagnóstico: confirma no console se o popup de desbloqueio está disponível
+// e permite testá-lo manualmente com smartgovGeo.abrirPopup().
+if (occurrenceForm) {
+  console.log('[geo] versao 2026-09-02 | popup no DOM:', Boolean(geoModal), '| suporta <dialog>:', Boolean(geoModal?.showModal));
+  window.smartgovGeo = {
+    abrirPopup: () => openGeoPermissionModal(),
+    estadoPermissao: () => getGeolocationPermissionState(),
+    tentarLocalizacao: () => requestGeolocationPermission()
+  };
+}
+
+// Renderiza a mensagem de geolocalizacao, opcionalmente com um botao de nova tentativa.
+function showGeoMessage(text, options = {}) {
+  if (!geoMessage) return;
+  geoMessage.textContent = '';
+  geoMessage.classList.toggle('error', Boolean(options.isError));
+
+  const label = document.createElement('span');
+  label.textContent = text;
+  geoMessage.appendChild(label);
+
+  if (options.retryLabel) {
+    const retryButton = document.createElement('button');
+    retryButton.type = 'button';
+    retryButton.className = 'geo-retry-button';
+    retryButton.textContent = options.retryLabel;
+    retryButton.addEventListener('click', async () => {
+      retryButton.disabled = true;
+      const result = await getGeolocationAddress();
+      if (result.ok) {
+        useGeolocationMode();
+      } else if (result.denied) {
+        openGeoPermissionModal();
+      } else {
+        retryButton.disabled = false;
+      }
+    });
+    geoMessage.appendChild(retryButton);
+  }
+}
+
+// Volta o formulario para o modo "usar minha localizacao".
+function useGeolocationMode() {
+  if (geoRadio) geoRadio.checked = true;
+  updateAddressMode();
+}
+
+// Pede a permissao ao usuario. Se o navegador ja tiver bloqueado o site,
+// explica como reabilitar em vez de falhar silenciosamente.
+async function requestGeolocationPermission() {
+  const state = await getGeolocationPermissionState();
+  console.log('[geo] estado da permissao:', state);
+
+  if (state === 'denied') {
+    return openGeoPermissionModal();
   }
 
-  if (geoMessage) geoMessage.textContent = 'Obtendo localização...';
+  const result = await getGeolocationAddress();
+  if (result.ok) return true;
+
+  // Cobre o caso em que a Permissions API ainda reporta 'prompt' (usuário
+  // dispensou o balão) mas a chamada foi recusada mesmo assim.
+  if (result.denied) return openGeoPermissionModal();
+
+  return false;
+}
+
+// Passos de desbloqueio conforme o navegador em uso.
+function getGeoUnblockSteps() {
+  const ua = navigator.userAgent;
+  const isEdge = /Edg\//.test(ua);
+  const isFirefox = /Firefox\//.test(ua);
+  const isSafari = /Safari\//.test(ua) && !/Chrome|Chromium|Edg\//.test(ua);
+
+  if (isFirefox) {
+    return [
+      'Clique no ícone de cadeado à esquerda do endereço do site.',
+      'Localize a linha "Acessar sua localização" e clique no "x" para remover o bloqueio.',
+      'Recarregue a página se necessário e permita o acesso quando o Firefox perguntar.'
+    ];
+  }
+
+  if (isSafari) {
+    return [
+      'No menu superior, abra Safari › Configurações (ou Preferências).',
+      'Vá até a aba "Sites" e selecione "Localização" na lista lateral.',
+      'Encontre este site e troque a opção para "Perguntar" ou "Permitir".'
+    ];
+  }
+
+  const menuName = isEdge ? 'Permissões para este site' : 'Configurações do site';
+  return [
+    'Clique no ícone de cadeado (ou de ajustes) à esquerda do endereço do site.',
+    `Abra "${menuName}" e encontre a opção "Localização".`,
+    'Troque de "Bloquear" para "Permitir".'
+  ];
+}
+
+// Mostra o popup explicando como desbloquear a localização.
+// Resolve true somente se a localização for obtida; false se o usuário optar pelo modo manual.
+function openGeoPermissionModal() {
+  console.log('[geo] abrindo popup de desbloqueio');
+
+  // Sem suporte a <dialog>: mantém o aviso inline como alternativa.
+  if (!geoModal?.showModal) {
+    showGeoMessage(
+      'A localização está bloqueada para este site. Libere o acesso nas configurações do navegador '
+        + 'ou preencha o endereço manualmente.',
+      { isError: true, retryLabel: 'Já liberei, tentar novamente' }
+    );
+    switchToManualAddress();
+    return Promise.resolve(false);
+  }
+
+  if (geoModalSteps) {
+    geoModalSteps.textContent = '';
+    getGeoUnblockSteps().forEach((step) => {
+      const item = document.createElement('li');
+      item.textContent = step;
+      geoModalSteps.appendChild(item);
+    });
+  }
+
+  setGeoModalMessage('');
+  if (geoModalRetry) geoModalRetry.disabled = false;
+  geoModal.showModal();
+
+  return new Promise((resolve) => {
+    const finish = (result) => {
+      geoModalRetry?.removeEventListener('click', onRetry);
+      geoModalManual?.removeEventListener('click', onManual);
+      geoModal.removeEventListener('cancel', onCancel);
+      if (geoModal.open) geoModal.close();
+      resolve(result);
+    };
+
+    const onRetry = async () => {
+      if (geoModalRetry) geoModalRetry.disabled = true;
+      setGeoModalMessage('Verificando a permissão...');
+
+      const state = await getGeolocationPermissionState();
+      if (state === 'denied') {
+        setGeoModalMessage(
+          'A localização ainda está bloqueada. Conclua os passos acima e tente de novo.',
+          true
+        );
+        if (geoModalRetry) geoModalRetry.disabled = false;
+        return;
+      }
+
+      const result = await getGeolocationAddress();
+      if (result.ok) {
+        useGeolocationMode();
+        finish(true);
+        return;
+      }
+
+      setGeoModalMessage(
+        result.denied
+          ? 'A localização ainda está bloqueada. Conclua os passos acima e tente de novo.'
+          : 'Ainda não foi possível obter sua localização. Tente novamente ou preencha o endereço manualmente.',
+        true
+      );
+      if (geoModalRetry) geoModalRetry.disabled = false;
+    };
+
+    const onManual = () => {
+      switchToManualAddress();
+      showGeoMessage('Preencha o endereço manualmente abaixo.');
+      finish(false);
+    };
+
+    // Fechar pelo Esc equivale a escolher o preenchimento manual.
+    const onCancel = () => {
+      switchToManualAddress();
+      showGeoMessage('Preencha o endereço manualmente abaixo.');
+      finish(false);
+    };
+
+    geoModalRetry?.addEventListener('click', onRetry);
+    geoModalManual?.addEventListener('click', onManual);
+    geoModal.addEventListener('cancel', onCancel);
+  });
+}
+
+function setGeoModalMessage(text, isError = false) {
+  if (!geoModalMessage) return;
+  geoModalMessage.textContent = text;
+  geoModalMessage.classList.toggle('error', isError);
+}
+
+// Alterna o formulário para o preenchimento manual do endereço.
+function switchToManualAddress() {
+  if (manualRadio) manualRadio.checked = true;
+  updateAddressMode();
+}
+
+// Consulta o estado da permissao. Retorna 'unknown' se a Permissions API nao existir.
+async function getGeolocationPermissionState() {
+  if (!navigator.permissions?.query) return 'unknown';
+  try {
+    const status = await navigator.permissions.query({ name: 'geolocation' });
+    return status.state;
+  } catch (error) {
+    return 'unknown';
+  }
+}
+
+// Se o usuario liberar a localizacao nas configuracoes do navegador, o formulario
+// passa a usa-la na hora, sem precisar recarregar a pagina.
+async function watchGeolocationPermission() {
+  if (!navigator.permissions?.query) return;
+
+  let status;
+  try {
+    status = await navigator.permissions.query({ name: 'geolocation' });
+  } catch (error) {
+    return;
+  }
+
+  status.addEventListener('change', async () => {
+    if (status.state === 'granted') {
+      const result = await getGeolocationAddress();
+      if (result.ok) useGeolocationMode();
+    } else if (status.state === 'prompt') {
+      showGeoMessage('Você pode usar sua localização novamente.', {
+        retryLabel: 'Usar minha localização'
+      });
+    } else {
+      showGeoMessage(
+        'A localização foi bloqueada para este site. Preencha o endereço manualmente ou libere o acesso no navegador.',
+        { isError: true, retryLabel: 'Já habilitei, usar minha localização' }
+      );
+      switchToManualAddress();
+    }
+  });
+}
+
+// Retorna { ok, denied }: `denied` indica que a falha foi de permissão,
+// o que dispara o popup com as instruções de desbloqueio.
+async function getGeolocationAddress() {
+  if (!navigator.geolocation) {
+    showGeoMessage('Geolocalização não disponível neste navegador.', { isError: true });
+    return { ok: false, denied: false };
+  }
+
+  showGeoMessage('Obtendo localização...');
 
   return new Promise((resolve) => {
     navigator.geolocation.getCurrentPosition(async (pos) => {
       const { latitude, longitude } = pos.coords;
       const result = await reverseGeocode(latitude, longitude);
       if (!result) {
-        if (geoMessage) geoMessage.textContent = 'Não foi possível obter o endereço a partir da localização.';
-        return resolve(false);
+        showGeoMessage('Não foi possível obter o endereço a partir da localização.', {
+          isError: true,
+          retryLabel: 'Tentar novamente'
+        });
+        return resolve({ ok: false, denied: false });
       }
 
       if (cepInput) cepInput.value = result.cep;
@@ -1711,11 +1975,30 @@ async function getGeolocationAddress() {
       sessionStorage.setItem('smartgov360-last-latitude', String(latitude));
       sessionStorage.setItem('smartgov360-last-longitude', String(longitude));
 
-      if (geoMessage) geoMessage.textContent = 'Endereço preenchido pela sua localização.';
-      resolve(true);
+      showGeoMessage('Endereço preenchido pela sua localização.');
+      resolve({ ok: true, denied: false });
     }, (err) => {
-      if (geoMessage) geoMessage.textContent = 'Erro ao obter localização: ' + err.message;
-      resolve(false);
+      console.log('[geo] falha:', err.code, err.message);
+
+      if (err.code === err.PERMISSION_DENIED) {
+        // A mensagem detalhada fica a cargo do popup de desbloqueio.
+        showGeoMessage('Permissão de localização negada.', { isError: true });
+        resolve({ ok: false, denied: true });
+        return;
+      }
+
+      if (err.code === err.TIMEOUT) {
+        showGeoMessage('Tempo esgotado ao obter a localização.', {
+          isError: true,
+          retryLabel: 'Tentar novamente'
+        });
+      } else {
+        showGeoMessage('Não foi possível obter sua localização. Preencha o endereço manualmente.', {
+          isError: true,
+          retryLabel: 'Tentar novamente'
+        });
+      }
+      resolve({ ok: false, denied: false });
     }, { enableHighAccuracy: true, timeout: 10000 });
   });
 }

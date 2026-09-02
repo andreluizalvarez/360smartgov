@@ -129,6 +129,25 @@
       </div>
     </footer>
 
+    <dialog id="geo-permission-modal" class="geo-modal" aria-labelledby="geo-modal-title">
+      <div class="geo-modal-content">
+        <h3 id="geo-modal-title">Localização bloqueada</h3>
+        <p class="geo-modal-intro">
+          Seu navegador está bloqueando o acesso à localização para este site. Para usar
+          o preenchimento automático do endereço, libere a permissão seguindo os passos abaixo.
+        </p>
+        <ol id="geo-modal-steps" class="geo-modal-steps"></ol>
+        <p class="geo-modal-note">
+          Depois de liberar, volte aqui e clique em <strong>Já liberei, tentar novamente</strong>.
+        </p>
+        <div class="geo-modal-actions">
+          <button type="button" id="geo-modal-retry" class="btn btn-secondary">Já liberei, tentar novamente</button>
+          <button type="button" id="geo-modal-manual" class="btn btn-ghost">Preencher endereço manualmente</button>
+        </div>
+        <p id="geo-modal-message" class="geo-modal-message" role="status" aria-live="polite"></p>
+      </div>
+    </dialog>
+
     <script src="script.js"></script>
   </body>
 </html>

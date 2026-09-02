@@ -1,5 +1,6 @@
 const express = require('express');
 const path = require('path');
+const fs = require('fs');
 require('dotenv').config();
 const multer = require('multer');
 const nodemailer = require('nodemailer');
@@ -63,6 +64,59 @@ function listaEfetivaDeCategorias(categorias) {
 
   const temGenerica = lista.some((item) => TERMOS_CATEGORIA_GENERICA.includes(textoComparavel(item)));
   return temGenerica ? lista : [...lista, CATEGORIA_GENERICA_PADRAO];
+}
+
+// A configuracao vive no servidor, nao no navegador: a lista de categorias
+// precisa valer para todo mundo — o cidadao que preenche o formulario esta em
+// outro navegador que nunca viu o que o administrador cadastrou.
+const DIRETORIO_DADOS = path.join(__dirname, 'dados');
+const ARQUIVO_CONFIG = path.join(DIRETORIO_DADOS, 'configuracao.json');
+
+function lerConfiguracao() {
+  try {
+    const bruto = fs.readFileSync(ARQUIVO_CONFIG, 'utf8');
+    const config = JSON.parse(bruto);
+    return {
+      categories: Array.isArray(config.categories) && config.categories.length
+        ? config.categories : null,
+      priorities: Array.isArray(config.priorities) && config.priorities.length
+        ? config.priorities : null,
+      atualizadoEm: config.atualizadoEm || null
+    };
+  } catch (error) {
+    // Sem arquivo ainda (ou ilegivel): cai nos padroes.
+    return { categories: null, priorities: null, atualizadoEm: null };
+  }
+}
+
+function salvarConfiguracao({ categories, priorities }) {
+  const atual = lerConfiguracao();
+  const config = {
+    categories: Array.isArray(categories) && categories.length
+      ? categories.map((item) => item.toString().trim()).filter(Boolean)
+      : atual.categories,
+    priorities: Array.isArray(priorities) && priorities.length
+      ? priorities.map((item) => item.toString().trim()).filter(Boolean)
+      : atual.priorities,
+    atualizadoEm: new Date().toISOString()
+  };
+
+  fs.mkdirSync(DIRETORIO_DADOS, { recursive: true });
+  fs.writeFileSync(ARQUIVO_CONFIG, JSON.stringify(config, null, 2), 'utf8');
+  return config;
+}
+
+// A lista salva no servidor tem precedencia sobre a enviada pelo cliente: um
+// navegador com cache antigo nao pode classificar com categorias ja removidas.
+function categoriasEmVigor(categoriasDoCliente) {
+  const salvas = lerConfiguracao().categories;
+  return listaEfetivaDeCategorias(salvas || categoriasDoCliente);
+}
+
+function prioridadesEmVigor(prioridadesDoCliente) {
+  const salvas = lerConfiguracao().priorities;
+  const lista = salvas || prioridadesDoCliente;
+  return Array.isArray(lista) && lista.length ? lista : DEFAULT_PRIORITIES;
 }
 
 // O destino do que nao se encaixa — sempre um item da propria lista.
@@ -361,14 +415,48 @@ async function sendWhatsAppNotification(toPhone, text) {
   return { sent: true, providerId: data?.sid || null };
 }
 
+// Lista em vigor, consultada por qualquer navegador ao abrir o site.
+app.get('/api/config', (req, res) => {
+  const config = lerConfiguracao();
+  return res.json({
+    categories: listaEfetivaDeCategorias(config.categories),
+    priorities: config.priorities || DEFAULT_PRIORITIES,
+    atualizadoEm: config.atualizadoEm
+  });
+});
+
+// Gravada pelo painel sempre que uma categoria e adicionada ou removida.
+app.put('/api/config', (req, res) => {
+  const { categories, priorities } = req.body || {};
+
+  if (categories !== undefined && (!Array.isArray(categories) || !categories.length)) {
+    return res.status(400).json({ error: 'categories deve ser uma lista nao vazia.' });
+  }
+  if (priorities !== undefined && (!Array.isArray(priorities) || !priorities.length)) {
+    return res.status(400).json({ error: 'priorities deve ser uma lista nao vazia.' });
+  }
+
+  try {
+    const config = salvarConfiguracao({ categories, priorities });
+    return res.json({
+      categories: listaEfetivaDeCategorias(config.categories),
+      priorities: config.priorities || DEFAULT_PRIORITIES,
+      atualizadoEm: config.atualizadoEm
+    });
+  } catch (error) {
+    console.error('Falha ao salvar a configuracao:', error);
+    return res.status(500).json({ error: 'Nao foi possivel salvar a configuracao.' });
+  }
+});
+
 app.post('/api/classify', async (req, res) => {
   if (!OPENAI_API_KEY) {
     return res.status(500).json({ error: 'OpenAI API key is not configured.' });
   }
 
   const { description, cep, street, number, neighborhood, city, state, categories, priorities } = req.body;
-  const categoryList = listaEfetivaDeCategorias(categories);
-  const priorityList = Array.isArray(priorities) && priorities.length ? priorities : DEFAULT_PRIORITIES;
+  const categoryList = categoriasEmVigor(categories);
+  const priorityList = prioridadesEmVigor(priorities);
   const categoryText = categoryList.map((item) => `• ${item}`).join('; ');
   const priorityText = priorityList.join(', ');
 
@@ -454,10 +542,8 @@ app.post('/api/classify-image', upload.single('photo'), async (req, res) => {
     priorities = DEFAULT_PRIORITIES;
   }
 
-  if (!Array.isArray(priorities) || !priorities.length) {
-    priorities = DEFAULT_PRIORITIES;
-  }
-  categories = listaEfetivaDeCategorias(categories);
+  priorities = prioridadesEmVigor(priorities);
+  categories = categoriasEmVigor(categories);
   const categoryText = categories.map((item) => `• ${item}`).join('; ');
   const priorityText = priorities.join(', ');
   const promptText = `Esta chamada trata-se de um aplicativo de zeladoria pública. Utilize a foto enviada pelo usuário como evidência. Classifique a ocorrência usando EXCLUSIVAMENTE uma das categorias desta lista, copiada exatamente como está escrita: ${categoryText}. Não crie categorias novas nem variações de escrita: se nada se encaixar, use "${categoriaGenerica(categories)}". Classifique a prioridade entre: ${priorityText}.`;

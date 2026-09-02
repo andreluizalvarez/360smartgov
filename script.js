@@ -716,13 +716,98 @@ function getPriorityConfig() {
   }
 }
 
+// O localStorage e apenas um cache local para leitura sincrona. A lista que
+// vale para todos — inclusive para o cidadao, que usa outro navegador — fica
+// no servidor, e toda alteracao e enviada para la.
 function saveCategoryConfig(list) {
   localStorage.setItem(CATEGORY_CONFIG_KEY, JSON.stringify(list));
+  enviarConfiguracaoAoServidor({ categories: list });
 }
 
 function savePriorityConfig(list) {
   localStorage.setItem(PRIORITY_CONFIG_KEY, JSON.stringify(list));
+  enviarConfiguracaoAoServidor({ priorities: list });
 }
+
+async function enviarConfiguracaoAoServidor(config) {
+  try {
+    const resposta = await fetch('/api/config', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(config)
+    });
+
+    if (!resposta.ok) {
+      console.error('[config] O servidor recusou a alteracao:', resposta.status);
+      if (adminMessage) {
+        showMessage(adminMessage, 'A alteração foi salva neste navegador, mas o servidor recusou. A classificação por IA pode não refletir a mudança.', true);
+      }
+      return false;
+    }
+
+    // Reaproveita a lista normalizada que o servidor devolve.
+    const salvo = await resposta.json();
+    if (Array.isArray(salvo.categories) && salvo.categories.length) {
+      localStorage.setItem(CATEGORY_CONFIG_KEY, JSON.stringify(salvo.categories));
+    }
+    if (Array.isArray(salvo.priorities) && salvo.priorities.length) {
+      localStorage.setItem(PRIORITY_CONFIG_KEY, JSON.stringify(salvo.priorities));
+    }
+    return true;
+  } catch (error) {
+    console.error('[config] Falha ao enviar a configuracao:', error);
+    if (adminMessage) {
+      showMessage(adminMessage, 'A alteração foi salva neste navegador, mas não chegou ao servidor. Verifique a conexão.', true);
+    }
+    return false;
+  }
+}
+
+// Ao abrir o site, alinha o cache local com a lista em vigor no servidor.
+// E o que faz uma categoria adicionada ou removida no painel valer para
+// a classificacao de qualquer visitante.
+async function carregarConfiguracaoDoServidor() {
+  try {
+    const resposta = await fetch('/api/config');
+    if (!resposta.ok) return false;
+
+    const config = await resposta.json();
+    let mudou = false;
+
+    if (Array.isArray(config.categories) && config.categories.length) {
+      const atual = localStorage.getItem(CATEGORY_CONFIG_KEY);
+      const novo = JSON.stringify(config.categories);
+      if (atual !== novo) {
+        localStorage.setItem(CATEGORY_CONFIG_KEY, novo);
+        mudou = true;
+      }
+    }
+
+    if (Array.isArray(config.priorities) && config.priorities.length) {
+      const atual = localStorage.getItem(PRIORITY_CONFIG_KEY);
+      const novo = JSON.stringify(config.priorities);
+      if (atual !== novo) {
+        localStorage.setItem(PRIORITY_CONFIG_KEY, novo);
+        mudou = true;
+      }
+    }
+
+    // Redesenha o que ja estiver na tela com a lista atualizada.
+    if (mudou) {
+      if (typeof renderCategoryConfig === 'function') renderCategoryConfig();
+      if (typeof renderPriorityConfig === 'function') renderPriorityConfig();
+      if (typeof renderUserCategoryAccessOptions === 'function') renderUserCategoryAccessOptions();
+    }
+
+    return true;
+  } catch (error) {
+    // Sem servidor, segue com o cache local.
+    console.warn('[config] Nao foi possivel obter a configuracao do servidor:', error);
+    return false;
+  }
+}
+
+carregarConfiguracaoDoServidor();
 
 function renderCategoryConfig() {
   if (!categoryList) return;

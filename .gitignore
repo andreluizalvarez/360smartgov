@@ -15,3 +15,6 @@ Thumbs.db
 
 # Scripts auxiliares locais
 gerar_planilha.py
+
+# Configuracao gravada em tempo de execucao (categorias, prioridades)
+dados/

@@ -27,7 +27,14 @@ function carregarFuncoes() {
   const fim = codigo.indexOf('function normalizePhoneForWhatsApp');
   const trecho = codigo.slice(inicio, fim).replace(/^app\.use\(.*$/gm, '');
 
-  const sandbox = { console: { log() {}, warn() {}, error() {}, debug() {} } };
+  // O recorte usa path/fs para localizar a configuracao persistida; aqui ela
+  // nao existe, e as funcoes caem nos padroes — que e o que se quer testar.
+  const sandbox = {
+    console: { log() {}, warn() {}, error() {}, debug() {} },
+    path,
+    fs,
+    __dirname: RAIZ
+  };
   vm.createContext(sandbox);
   vm.runInContext(
     trecho

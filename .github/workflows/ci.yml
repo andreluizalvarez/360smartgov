@@ -28,6 +28,9 @@ jobs:
           node --check script.js
           node --check preview.js
 
+      - name: Testes de regressao
+        run: node testes/incidentes.test.js
+
       - name: Verificar se o servidor sobe
         run: |
           node server.js &

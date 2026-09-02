@@ -1,4 +1,5 @@
 const STORAGE_KEY = 'smartgov360-incidents-v1';
+const STORAGE_BACKUP_KEY = 'smartgov360-incidents-v1-backup';
 const ADMIN_USERS_KEY = 'smartgov360-admin-users-v1';
 const ADMIN_SESSION_KEY = 'smartgov360-admin-session-v1';
 const SYSTEM_ADMIN_ROLE = 'system_admin';
@@ -579,12 +580,93 @@ function hideAdminDashboard() {
   }
 }
 
-function saveIncidents(incidents) {
+// `permitirVazio` so e usado pela acao de limpar tudo do painel. Qualquer outra
+// gravacao que zeraria a base e recusada: e sempre sintoma de bug, nunca intencao.
+function saveIncidents(incidents, { permitirVazio = false } = {}) {
   const normalized = Array.isArray(incidents)
     ? incidents.map(normalizeIncident).filter(Boolean)
     : [];
+
+  if (!normalized.length && !permitirVazio) {
+    const existentes = lerIncidentesSalvos();
+    if (existentes.length) {
+      console.error(
+        '[incidentes] Gravacao vazia bloqueada: havia',
+        existentes.length,
+        'ocorrencia(s) salvas. Nada foi apagado.'
+      );
+      return false;
+    }
+  }
+
+  // Guarda a versao anterior antes de reduzir a base, para permitir restauracao.
+  const anteriores = lerIncidentesSalvos();
+  if (anteriores.length > normalized.length) {
+    try {
+      localStorage.setItem(STORAGE_BACKUP_KEY, JSON.stringify(anteriores));
+    } catch (error) {
+      console.warn('[incidentes] Nao foi possivel guardar o backup:', error);
+    }
+  }
+
   localStorage.setItem(STORAGE_KEY, JSON.stringify(normalized));
+  return true;
 }
+
+// Le o que esta gravado sem recorrer ao seed inicial de getIncidents().
+function lerIncidentesSalvos() {
+  try {
+    const bruto = localStorage.getItem(STORAGE_KEY);
+    if (!bruto) return [];
+    const lista = JSON.parse(bruto);
+    return Array.isArray(lista) ? lista : [];
+  } catch (error) {
+    return [];
+  }
+}
+
+// Ferramentas de recuperacao, para uso no console do navegador.
+window.smartgovIncidentes = {
+  // Quantas ocorrencias estao salvas agora.
+  listar: () => lerIncidentesSalvos(),
+
+  // Copia guardada automaticamente antes da ultima reducao da base.
+  verBackup() {
+    try {
+      const bruto = localStorage.getItem(STORAGE_BACKUP_KEY);
+      return bruto ? JSON.parse(bruto) : [];
+    } catch (error) {
+      return [];
+    }
+  },
+
+  // Devolve o backup para a base ativa.
+  restaurarBackup() {
+    const backup = this.verBackup();
+    if (!backup.length) {
+      console.warn('Nao ha backup guardado.');
+      return false;
+    }
+    saveIncidents(backup);
+    console.log('Restauradas', backup.length, 'ocorrencia(s). Recarregue a pagina.');
+    return true;
+  },
+
+  // JSON para guardar fora do navegador.
+  exportar: () => JSON.stringify(lerIncidentesSalvos(), null, 2),
+
+  // Repoe a partir de um JSON exportado antes.
+  importar(json) {
+    const lista = typeof json === 'string' ? JSON.parse(json) : json;
+    if (!Array.isArray(lista)) {
+      console.error('Esperado um array de ocorrencias.');
+      return false;
+    }
+    saveIncidents(lista);
+    console.log('Importadas', lista.length, 'ocorrencia(s). Recarregue a pagina.');
+    return true;
+  }
+};
 
 function getCategoryConfig() {
   const saved = localStorage.getItem(CATEGORY_CONFIG_KEY);
@@ -776,7 +858,16 @@ async function resolveIncidentCoordinates(incident) {
 async function ensureIncidentCoordinates(incidents) {
   if (!googleMapsLoaded) return incidents;
   const updated = await Promise.all(incidents.map(resolveIncidentCoordinates));
-  saveIncidents(updated);
+
+  // `incidents` pode ser um subconjunto filtrado por permissao (um admin de
+  // categoria so enxerga a sua). Gravar esse subconjunto direto apagaria as
+  // ocorrencias das demais categorias, entao as coordenadas sao mescladas
+  // sobre a base completa.
+  const porId = new Map(updated.filter((item) => item && item.id).map((item) => [item.id, item]));
+  const base = getIncidents();
+  const mesclado = base.map((item) => porId.get(item.id) || item);
+  saveIncidents(mesclado);
+
   return updated;
 }
 
@@ -1459,7 +1550,7 @@ if (clearIncidentsBtn) {
     if (!ensureSystemAdminAction()) return;
     const confirmed = window.confirm('Tem certeza que deseja limpar todas as ocorrências cadastradas?');
     if (!confirmed) return;
-    saveIncidents([]);
+    saveIncidents([], { permitirVazio: true });
     await refreshDashboard();
     showMessage(adminMessage, 'Todas as ocorrências foram removidas.', false);
   });

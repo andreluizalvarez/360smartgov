@@ -189,6 +189,28 @@
             </div>
           </div>
 
+          <div class="admin-box">
+            <h3>Alterar minha senha</h3>
+            <form id="senha-form" class="form-grid compact" autocomplete="off">
+              <div class="field">
+                <label for="senha-atual">Senha atual</label>
+                <input id="senha-atual" name="senha-atual" type="password" autocomplete="current-password" required />
+              </div>
+              <div class="field">
+                <label for="senha-nova">Nova senha</label>
+                <input id="senha-nova" name="senha-nova" type="password" autocomplete="new-password" minlength="6" required />
+              </div>
+              <div class="field">
+                <label for="senha-confirma">Confirme a nova senha</label>
+                <input id="senha-confirma" name="senha-confirma" type="password" autocomplete="new-password" minlength="6" required />
+              </div>
+              <div class="field full">
+                <button class="btn btn-secondary" type="submit">Alterar senha</button>
+              </div>
+            </form>
+            <div id="senha-message" class="form-message" role="status" aria-live="polite"></div>
+          </div>
+
           <div style="margin-top:16px; display:flex; gap:10px; flex-wrap:wrap;">
             <button id="clear-incidents-btn" class="btn btn-danger" type="button">Limpar ocorrências</button>
             <button id="logout-btn" class="btn">Sair</button>

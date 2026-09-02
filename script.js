@@ -225,6 +225,42 @@ function normalizeAdminUser(user) {
   };
 }
 
+// ------------------------------------------------------------------ sessao
+//
+// A autenticacao acontece no servidor: o login devolve um token assinado, que
+// acompanha toda requisicao administrativa. O localStorage guarda apenas um
+// espelho dos usuarios para a tela, nunca senhas.
+const TOKEN_KEY = 'smartgov360-token';
+
+function getToken() {
+  return sessionStorage.getItem(TOKEN_KEY) || '';
+}
+
+function setToken(token) {
+  if (token) sessionStorage.setItem(TOKEN_KEY, token);
+  else sessionStorage.removeItem(TOKEN_KEY);
+}
+
+// fetch com o token da sessao; 401 significa sessao expirada.
+async function apiAutenticada(caminho, opcoes = {}) {
+  const token = getToken();
+  const headers = { ...(opcoes.headers || {}) };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  if (opcoes.body && !headers['Content-Type']) headers['Content-Type'] = 'application/json';
+
+  const resposta = await fetch(caminho, { ...opcoes, headers });
+
+  if (resposta.status === 401) {
+    setToken('');
+    if (typeof hideAdminDashboard === 'function') hideAdminDashboard();
+    if (loginMessage) {
+      showMessage(loginMessage, 'Sua sessão expirou. Entre novamente.', true);
+    }
+  }
+
+  return resposta;
+}
+
 function saveAdminUsers(users) {
   localStorage.setItem(ADMIN_USERS_KEY, JSON.stringify(users));
 }
@@ -468,39 +504,78 @@ function createAdminUser(event) {
     renderAdminUsers();
     showMessage(adminMessage, 'Usuário atualizado com sucesso.', false);
   } else {
-    users.push({
-      id: crypto.randomUUID(),
-      username,
-      password,
-      role,
-      allowedCategories,
-      createdAt: new Date().toISOString()
-    });
-    saveAdminUsers(users);
+    criarUsuarioNoServidor({ username, senha: password, role, allowedCategories });
+  }
+}
 
+// O usuario e criado no servidor, que guarda a senha com hash. A lista local
+// so espelha o que voltou de la.
+async function criarUsuarioNoServidor(dados) {
+  try {
+    const resposta = await apiAutenticada('/api/auth/usuarios', {
+      method: 'POST',
+      body: JSON.stringify(dados)
+    });
+
+    const corpo = await resposta.json().catch(() => ({}));
+
+    if (!resposta.ok) {
+      showMessage(adminMessage, corpo.error || 'Não foi possível cadastrar o usuário.', true);
+      return false;
+    }
+
+    await sincronizarUsuariosDoServidor();
     if (adminUserForm) adminUserForm.reset();
     updateAdminRoleUi();
     renderUserCategoryAccessOptions();
     renderAdminUsers();
     showMessage(adminMessage, 'Usuário administrador cadastrado com sucesso.', false);
+    return true;
+  } catch (error) {
+    console.error('Falha ao cadastrar usuario:', error);
+    showMessage(adminMessage, 'Não foi possível falar com o servidor.', true);
+    return false;
   }
 }
 
-function removeAdminUser(userId) {
-  if (!ensureSystemAdminAction()) return;
-  const users = getAdminUsers();
-  const targetUser = users.find((user) => user.id === userId);
-  if (!targetUser) return;
+// Traz do servidor a lista de administradores (sem senhas) para a tela.
+async function sincronizarUsuariosDoServidor() {
+  try {
+    const resposta = await apiAutenticada('/api/auth/usuarios');
+    if (!resposta.ok) return false;
 
-  if (targetUser.role === SYSTEM_ADMIN_ROLE) {
-    showMessage(adminMessage, 'Não é permitido remover o administrador do sistema.', true);
-    return;
+    const corpo = await resposta.json();
+    if (!Array.isArray(corpo.usuarios)) return false;
+
+    localStorage.setItem(ADMIN_USERS_KEY, JSON.stringify(corpo.usuarios));
+    return true;
+  } catch (error) {
+    console.warn('[auth] Nao foi possivel obter os usuarios:', error);
+    return false;
   }
+}
 
-  const updated = users.filter((user) => user.id !== userId);
-  saveAdminUsers(updated);
-  renderAdminUsers();
-  showMessage(adminMessage, 'Usuário removido com sucesso.', false);
+async function removeAdminUser(userId) {
+  if (!ensureSystemAdminAction()) return;
+
+  try {
+    const resposta = await apiAutenticada(`/api/auth/usuarios/${encodeURIComponent(userId)}`, {
+      method: 'DELETE'
+    });
+    const corpo = await resposta.json().catch(() => ({}));
+
+    if (!resposta.ok) {
+      showMessage(adminMessage, corpo.error || 'Não foi possível remover o usuário.', true);
+      return;
+    }
+
+    await sincronizarUsuariosDoServidor();
+    renderAdminUsers();
+    showMessage(adminMessage, 'Usuário removido com sucesso.', false);
+  } catch (error) {
+    console.error('Falha ao remover usuario:', error);
+    showMessage(adminMessage, 'Não foi possível falar com o servidor.', true);
+  }
 }
 
 function startEditUser(userId) {
@@ -731,16 +806,18 @@ function savePriorityConfig(list) {
 
 async function enviarConfiguracaoAoServidor(config) {
   try {
-    const resposta = await fetch('/api/config', {
+    const resposta = await apiAutenticada('/api/config', {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(config)
     });
 
     if (!resposta.ok) {
       console.error('[config] O servidor recusou a alteracao:', resposta.status);
       if (adminMessage) {
-        showMessage(adminMessage, 'A alteração foi salva neste navegador, mas o servidor recusou. A classificação por IA pode não refletir a mudança.', true);
+        const motivo = resposta.status === 401 || resposta.status === 403
+          ? 'Sua sessão não tem permissão para alterar as categorias.'
+          : 'A alteração foi salva neste navegador, mas o servidor recusou. A classificação por IA pode não refletir a mudança.';
+        showMessage(adminMessage, motivo, true);
       }
       return false;
     }
@@ -1601,21 +1678,83 @@ if (loginForm) {
     const formData = new FormData(loginForm);
     const username = (formData.get('username') || '').toString().trim();
     const password = (formData.get('password') || '').toString();
-    const user = getAdminUsers().find(
-      (item) => normalizePermissionValue(item.username) === normalizePermissionValue(username) && item.password === password
-    );
 
-    if (user) {
+    showMessage(loginMessage, 'Entrando...', false);
+
+    try {
+      const resposta = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password })
+      });
+
+      const dados = await resposta.json().catch(() => ({}));
+
+      if (!resposta.ok) {
+        setToken('');
+        showMessage(loginMessage, dados.error || 'Usuário ou senha inválidos.', true);
+        return;
+      }
+
+      setToken(dados.token);
+      const user = dados.usuario;
+      await sincronizarUsuariosDoServidor();
       showAdminDashboard(user);
-      showMessage(loginMessage, `Login realizado com sucesso. Perfil: ${isSystemAdmin(user) ? 'Administrador do sistema' : 'Administrador por categoria'}.`, false);
-    } else {
-      showMessage(loginMessage, 'Usuário ou senha inválidos.', true);
+
+      const perfil = isSystemAdmin(user) ? 'Administrador do sistema' : 'Administrador por categoria';
+      const aviso = user.senhaPadrao
+        ? ' Você ainda usa a senha padrão — troque-a em "Alterar senha".'
+        : '';
+      showMessage(loginMessage, `Login realizado com sucesso. Perfil: ${perfil}.${aviso}`, false);
+    } catch (error) {
+      console.error('Falha ao autenticar:', error);
+      showMessage(loginMessage, 'Não foi possível falar com o servidor. Verifique a conexão.', true);
+    }
+  });
+}
+
+const senhaForm = document.getElementById('senha-form');
+const senhaMessage = document.getElementById('senha-message');
+
+if (senhaForm) {
+  senhaForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+
+    const dados = new FormData(senhaForm);
+    const senhaAtual = (dados.get('senha-atual') || '').toString();
+    const senhaNova = (dados.get('senha-nova') || '').toString();
+    const confirma = (dados.get('senha-confirma') || '').toString();
+
+    if (senhaNova !== confirma) {
+      showMessage(senhaMessage, 'A confirmação não confere com a nova senha.', true);
+      return;
+    }
+
+    try {
+      const resposta = await apiAutenticada('/api/auth/senha', {
+        method: 'POST',
+        body: JSON.stringify({ senhaAtual, senhaNova })
+      });
+      const corpo = await resposta.json().catch(() => ({}));
+
+      if (!resposta.ok) {
+        showMessage(senhaMessage, corpo.error || 'Não foi possível alterar a senha.', true);
+        return;
+      }
+
+      senhaForm.reset();
+      showMessage(senhaMessage, 'Senha alterada com sucesso.', false);
+    } catch (error) {
+      console.error('Falha ao alterar a senha:', error);
+      showMessage(senhaMessage, 'Não foi possível falar com o servidor.', true);
     }
   });
 }
 
 if (logoutBtn) {
   logoutBtn.addEventListener('click', () => {
+    // Encerra a sessao no servidor descartando o token.
+    setToken('');
     hideAdminDashboard();
     if (loginForm) {
       loginForm.reset();

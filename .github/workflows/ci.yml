@@ -33,6 +33,7 @@ jobs:
           node testes/incidentes.test.js
           node testes/categorias.test.js
           node testes/config.test.js
+          node testes/auth.test.js
 
       - name: Verificar se o servidor sobe
         run: |

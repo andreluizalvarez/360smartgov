@@ -1,6 +1,7 @@
 const express = require('express');
 const path = require('path');
 const fs = require('fs');
+const { criarAuth } = require('./auth');
 require('dotenv').config();
 const multer = require('multer');
 const nodemailer = require('nodemailer');
@@ -71,6 +72,9 @@ function listaEfetivaDeCategorias(categorias) {
 // outro navegador que nunca viu o que o administrador cadastrou.
 const DIRETORIO_DADOS = path.join(__dirname, 'dados');
 const ARQUIVO_CONFIG = path.join(DIRETORIO_DADOS, 'configuracao.json');
+
+const auth = criarAuth({ diretorioDados: DIRETORIO_DADOS });
+auth.garantirAdminPadrao();
 
 function lerConfiguracao() {
   try {
@@ -415,6 +419,49 @@ async function sendWhatsAppNotification(toPhone, text) {
   return { sent: true, providerId: data?.sid || null };
 }
 
+app.post('/api/auth/login', (req, res) => {
+  const { username, password } = req.body || {};
+  const resultado = auth.autenticar(username, password);
+  if (resultado.erro) {
+    return res.status(resultado.status).json({ error: resultado.erro });
+  }
+  return res.json(resultado);
+});
+
+// Confere se a sessao ainda vale e devolve o perfil atualizado.
+app.get('/api/auth/me', auth.exigirAutenticacao, (req, res) => {
+  return res.json({ usuario: req.usuario });
+});
+
+app.post('/api/auth/senha', auth.exigirAutenticacao, (req, res) => {
+  const { senhaAtual, senhaNova } = req.body || {};
+  const resultado = auth.alterarSenha(req.usuario.id, senhaAtual, senhaNova);
+  if (resultado.erro) {
+    return res.status(resultado.status).json({ error: resultado.erro });
+  }
+  return res.json(resultado);
+});
+
+app.get('/api/auth/usuarios', auth.exigirAdminSistema, (req, res) => {
+  return res.json({ usuarios: auth.listarUsuarios() });
+});
+
+app.post('/api/auth/usuarios', auth.exigirAdminSistema, (req, res) => {
+  const resultado = auth.criarUsuario(req.body || {});
+  if (resultado.erro) {
+    return res.status(resultado.status).json({ error: resultado.erro });
+  }
+  return res.status(201).json(resultado);
+});
+
+app.delete('/api/auth/usuarios/:id', auth.exigirAdminSistema, (req, res) => {
+  const resultado = auth.removerUsuario(req.params.id, req.usuario.id);
+  if (resultado.erro) {
+    return res.status(resultado.status).json({ error: resultado.erro });
+  }
+  return res.json(resultado);
+});
+
 // Lista em vigor, consultada por qualquer navegador ao abrir o site.
 app.get('/api/config', (req, res) => {
   const config = lerConfiguracao();
@@ -426,7 +473,7 @@ app.get('/api/config', (req, res) => {
 });
 
 // Gravada pelo painel sempre que uma categoria e adicionada ou removida.
-app.put('/api/config', (req, res) => {
+app.put('/api/config', auth.exigirAdminSistema, (req, res) => {
   const { categories, priorities } = req.body || {};
 
   if (categories !== undefined && (!Array.isArray(categories) || !categories.length)) {

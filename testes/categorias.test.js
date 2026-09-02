@@ -25,7 +25,12 @@ function carregarFuncoes() {
   const codigo = fs.readFileSync(path.join(RAIZ, 'server.js'), 'utf8');
   const inicio = codigo.indexOf('const DEFAULT_CATEGORIES');
   const fim = codigo.indexOf('function normalizePhoneForWhatsApp');
-  const trecho = codigo.slice(inicio, fim).replace(/^app\.use\(.*$/gm, '');
+  // Recorta so as funcoes de categoria: fora o Express e a inicializacao da
+  // autenticacao, que este teste nao exercita.
+  const trecho = codigo.slice(inicio, fim)
+    .replace(/^app\.use\(.*$/gm, '')
+    .replace(/^const auth = criarAuth.*$/gm, '')
+    .replace(/^auth\.garantirAdminPadrao\(\);$/gm, '');
 
   // O recorte usa path/fs para localizar a configuracao persistida; aqui ela
   // nao existe, e as funcoes caem nos padroes — que e o que se quer testar.

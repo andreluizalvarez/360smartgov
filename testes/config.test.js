@@ -2,16 +2,19 @@
 // imediatamente na lista enviada a IA — inclusive para o cidadao, que usa
 // outro navegador e nunca viu o localStorage do administrador.
 //
-// Sobe o servidor de verdade e exercita GET/PUT /api/config.
+// Sobe o servidor de verdade e exercita GET/PUT /api/config. A escrita exige
+// administrador do sistema, entao o teste autentica antes.
 //
 // Rodar com: node testes/config.test.js
 const { spawn } = require('child_process');
 const http = require('http');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 
 const RAIZ = path.join(__dirname, '..');
-const ARQUIVO_CONFIG = path.join(RAIZ, 'dados', 'configuracao.json');
+const DIR_DADOS = path.join(RAIZ, 'dados');
+const ARQUIVO_CONFIG = path.join(DIR_DADOS, 'configuracao.json');
 const PORTA = 3999;
 
 let falhas = 0;
@@ -20,12 +23,21 @@ function ok(condicao, mensagem) {
   if (!condicao) falhas += 1;
 }
 
+// Token do administrador; acompanha as requisicoes depois do login.
+let token = '';
+
 function pedir(metodo, caminho, corpo) {
   return new Promise((resolve, reject) => {
     const dados = corpo ? JSON.stringify(corpo) : null;
+    const headers = {};
+    if (dados) {
+      headers['Content-Type'] = 'application/json';
+      headers['Content-Length'] = Buffer.byteLength(dados);
+    }
+    if (token) headers.Authorization = 'Bearer ' + token;
+
     const req = http.request(
-      { host: '127.0.0.1', port: PORTA, path: caminho, method: metodo,
-        headers: dados ? { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(dados) } : {} },
+      { host: '127.0.0.1', port: PORTA, path: caminho, method: metodo, headers },
       (res) => {
         let texto = '';
         res.on('data', (c) => (texto += c));
@@ -50,23 +62,30 @@ async function esperarServidor() {
 }
 
 (async () => {
-  // Guarda a configuracao existente para nao atrapalhar o ambiente local.
-  const tinhaConfig = fs.existsSync(ARQUIVO_CONFIG);
-  const backup = tinhaConfig ? fs.readFileSync(ARQUIVO_CONFIG, 'utf8') : null;
-  if (tinhaConfig) fs.unlinkSync(ARQUIVO_CONFIG);
+  // Roda com um diretorio de dados limpo e devolve o original ao final.
+  const backupDir = fs.existsSync(DIR_DADOS)
+    ? fs.mkdtempSync(path.join(os.tmpdir(), 'dados-'))
+    : null;
+  if (backupDir) {
+    fs.cpSync(DIR_DADOS, backupDir, { recursive: true });
+    fs.rmSync(DIR_DADOS, { recursive: true, force: true });
+  }
 
   const servidor = spawn(process.execPath, ['server.js'], {
-    cwd: RAIZ, env: { ...process.env, PORT: String(PORTA) }, stdio: ['ignore','pipe','pipe']
+    cwd: RAIZ,
+    env: { ...process.env, PORT: String(PORTA), ADMIN_INITIAL_PASSWORD: 'admin123' },
+    stdio: ['ignore', 'pipe', 'pipe']
   });
-
   servidor.stderr.on('data', (d) => console.log('[servidor]', d.toString().trim().slice(0, 200)));
-  servidor.on('error', (e) => console.log('[spawn]', e.message));
 
   const restaurar = () => {
     servidor.kill();
     try {
-      if (backup !== null) fs.writeFileSync(ARQUIVO_CONFIG, backup, 'utf8');
-      else if (fs.existsSync(ARQUIVO_CONFIG)) fs.unlinkSync(ARQUIVO_CONFIG);
+      fs.rmSync(DIR_DADOS, { recursive: true, force: true });
+      if (backupDir) {
+        fs.cpSync(backupDir, DIR_DADOS, { recursive: true });
+        fs.rmSync(backupDir, { recursive: true, force: true });
+      }
     } catch (e) { /* ambiente de teste */ }
   };
 
@@ -76,6 +95,14 @@ async function esperarServidor() {
       restaurar();
       process.exit(1);
     }
+
+    const login = await pedir('POST', '/api/auth/login', { username: 'admin', password: 'admin123' });
+    if (login.status !== 200) {
+      console.log(' FALHA nao foi possivel autenticar para os testes');
+      restaurar();
+      process.exit(1);
+    }
+    token = login.corpo.token;
 
     console.log('\nSem configuracao salva, vale a lista padrao');
     {

@@ -49,6 +49,52 @@ const DEFAULT_CATEGORIES = [
 ];
 const DEFAULT_PRIORITIES = ['Baixa', 'Média', 'Alta', 'Urgente'];
 
+// Termos que ja servem de destino para o que nao se encaixa em nenhuma categoria.
+const TERMOS_CATEGORIA_GENERICA = ['outros', 'outras', 'diversos', 'geral', 'nao classificado'];
+const CATEGORIA_GENERICA_PADRAO = 'outros';
+
+// A classificacao so pode usar categorias cadastradas. Como sempre precisa
+// existir um destino para o que nao se encaixa, a lista efetiva ganha uma
+// categoria generica quando nenhuma foi cadastrada.
+function listaEfetivaDeCategorias(categorias) {
+  const lista = Array.isArray(categorias) && categorias.length
+    ? categorias.filter((item) => (item || '').toString().trim())
+    : DEFAULT_CATEGORIES;
+
+  const temGenerica = lista.some((item) => TERMOS_CATEGORIA_GENERICA.includes(textoComparavel(item)));
+  return temGenerica ? lista : [...lista, CATEGORIA_GENERICA_PADRAO];
+}
+
+// O destino do que nao se encaixa — sempre um item da propria lista.
+function categoriaGenerica(lista) {
+  return lista.find((item) => TERMOS_CATEGORIA_GENERICA.includes(textoComparavel(item)))
+    || CATEGORIA_GENERICA_PADRAO;
+}
+
+// Structured Outputs: com `enum` e `strict`, a propria API recusa qualquer
+// valor fora da lista. E a garantia de que a IA nunca inventa uma categoria;
+// normalizeCategory continua como segunda linha de defesa.
+function esquemaDeClassificacao(categorias, prioridades) {
+  return {
+    type: 'json_schema',
+    json_schema: {
+      name: 'classificacao_ocorrencia',
+      strict: true,
+      schema: {
+        type: 'object',
+        properties: {
+          category: { type: 'string', enum: categorias },
+          priority: { type: 'string', enum: prioridades },
+          title: { type: 'string' },
+          description: { type: 'string' }
+        },
+        required: ['category', 'priority', 'title', 'description'],
+        additionalProperties: false
+      }
+    }
+  };
+}
+
 app.use(express.static(path.join(__dirname)));
 app.use(express.json());
 
@@ -79,9 +125,9 @@ function semPlural(palavra) {
 // lista configurada — e ela que popula as permissoes de cada administrador.
 // Uma categoria fora da lista deixaria a ocorrencia invisivel para todos.
 function normalizeCategory(value, categorias) {
-  const lista = Array.isArray(categorias) && categorias.length ? categorias : DEFAULT_CATEGORIES;
+  const lista = listaEfetivaDeCategorias(categorias);
   const alvo = textoComparavel(value);
-  if (!alvo) return 'Outros';
+  if (!alvo) return categoriaGenerica(lista);
 
   // 1) Igual, ignorando caixa e acento.
   const exata = lista.find((item) => textoComparavel(item) === alvo);
@@ -106,7 +152,8 @@ function normalizeCategory(value, categorias) {
     if (porPalavra) return porPalavra;
   }
 
-  return 'Outros';
+  // Nada correspondeu: o destino continua sendo um item da lista.
+  return categoriaGenerica(lista);
 }
 
 function normalizePriority(value) {
@@ -320,12 +367,12 @@ app.post('/api/classify', async (req, res) => {
   }
 
   const { description, cep, street, number, neighborhood, city, state, categories, priorities } = req.body;
-  const categoryList = Array.isArray(categories) && categories.length ? categories : DEFAULT_CATEGORIES;
+  const categoryList = listaEfetivaDeCategorias(categories);
   const priorityList = Array.isArray(priorities) && priorities.length ? priorities : DEFAULT_PRIORITIES;
   const categoryText = categoryList.map((item) => `• ${item}`).join('; ');
   const priorityText = priorityList.join(', ');
 
-  const prompt = `Para fazer a chamada da API do ChatGPT, utilizar o texto abaixo. Esta chamada trata-se de um aplicativo de zeladoria pública. Quero que identifique esta descrição e a classifique entre ${categoryText}. Classifique a prioridade entre: ${priorityText}. Retorne APENAS JSON válido no formato {"category":"...","priority":"...","title":"...","description":"..."}. Descrição: ${description}\nCEP: ${cep}\nLogradouro: ${street}\nNúmero: ${number}\nBairro: ${neighborhood}\nCidade: ${city}\nEstado: ${state}`;
+  const prompt = `Esta chamada trata-se de um aplicativo de zeladoria pública. Classifique a descrição abaixo usando EXCLUSIVAMENTE uma das categorias desta lista, copiada exatamente como está escrita: ${categoryText}. Não crie categorias novas nem variações de escrita: se nada se encaixar, use "${categoriaGenerica(categoryList)}". Classifique a prioridade entre: ${priorityText}. Descrição: ${description}\nCEP: ${cep}\nLogradouro: ${street}\nNúmero: ${number}\nBairro: ${neighborhood}\nCidade: ${city}\nEstado: ${state}`;
 
   try {
     console.debug('OpenAI /chat/completions prompt:', prompt);
@@ -338,10 +385,11 @@ app.post('/api/classify', async (req, res) => {
       body: JSON.stringify({
         model: 'gpt-4o-mini',
         messages: [
-          { role: 'system', content: 'Você é um assistente que classifica ocorrências urbanas.' },
+          { role: 'system', content: 'Você é um assistente que classifica ocorrências urbanas. Use somente as categorias fornecidas.' },
           { role: 'user', content: prompt }
         ],
-        temperature: 0
+        temperature: 0,
+        response_format: esquemaDeClassificacao(categoryList, priorityList)
       })
     });
 
@@ -406,15 +454,13 @@ app.post('/api/classify-image', upload.single('photo'), async (req, res) => {
     priorities = DEFAULT_PRIORITIES;
   }
 
-  if (!Array.isArray(categories) || !categories.length) {
-    categories = DEFAULT_CATEGORIES;
-  }
   if (!Array.isArray(priorities) || !priorities.length) {
     priorities = DEFAULT_PRIORITIES;
   }
+  categories = listaEfetivaDeCategorias(categories);
   const categoryText = categories.map((item) => `• ${item}`).join('; ');
   const priorityText = priorities.join(', ');
-  const promptText = `Para fazer a chamada da API do ChatGPT, utilizar o texto abaixo. Esta chamada trata-se de um aplicativo de zeladoria pública. Utilize a foto enviada pelo usuário como evidência. Quero que identifique esta imagem e a classifique entre ${categoryText}. Classifique a prioridade entre: ${priorityText}. Retorne APENAS JSON válido no formato {"category":"...","priority":"...","title":"...","description":"..."}.`;
+  const promptText = `Esta chamada trata-se de um aplicativo de zeladoria pública. Utilize a foto enviada pelo usuário como evidência. Classifique a ocorrência usando EXCLUSIVAMENTE uma das categorias desta lista, copiada exatamente como está escrita: ${categoryText}. Não crie categorias novas nem variações de escrita: se nada se encaixar, use "${categoriaGenerica(categories)}". Classifique a prioridade entre: ${priorityText}.`;
 
   try {
     console.debug('OpenAI /responses promptText:', promptText);
@@ -435,7 +481,13 @@ app.post('/api/classify-image', upload.single('photo'), async (req, res) => {
             ]
           }
         ],
-        temperature: 0
+        temperature: 0,
+        text: {
+          format: {
+            type: 'json_schema',
+            ...esquemaDeClassificacao(categories, priorities).json_schema
+          }
+        }
       })
     });
 

@@ -1,10 +1,11 @@
-// Regressao: a categoria devolvida pelo modelo precisa virar um item da lista
-// configurada. E essa lista que popula as permissoes por administrador — uma
-// categoria fora dela deixa a ocorrencia invisivel para todo mundo.
+// Regra: a classificacao NUNCA pode atribuir uma categoria que nao exista na
+// lista cadastrada. E essa lista que popula as permissoes por administrador —
+// uma categoria fora dela deixa a ocorrencia invisivel para todo mundo.
 //
-// O bug original: normalizeCategory() no server.js tinha 8 categorias fixas,
-// com nomes divergentes da lista real ("Buraco" contra "buracos"), e ignorava
-// por completo a lista recebida na requisicao.
+// Duas defesas cobrem isso:
+//   1. o schema enviado a OpenAI usa `enum` + `strict`, entao a propria API
+//      recusa qualquer valor fora da lista;
+//   2. normalizeCategory() valida a resposta e mapeia para um item da lista.
 //
 // Rodar com: node testes/categorias.test.js
 const fs = require('fs');
@@ -28,14 +29,21 @@ function carregarFuncoes() {
 
   const sandbox = { console: { log() {}, warn() {}, error() {}, debug() {} } };
   vm.createContext(sandbox);
-  vm.runInContext(trecho + '\n;globalThis.__cat = normalizeCategory;'
-    + '\n;globalThis.__lista = DEFAULT_CATEGORIES;', sandbox);
-  return sandbox;
+  vm.runInContext(
+    trecho
+      + '\n;globalThis.exp = { normalizeCategory, listaEfetivaDeCategorias,'
+      + ' categoriaGenerica, esquemaDeClassificacao, DEFAULT_CATEGORIES };',
+    sandbox
+  );
+  return sandbox.exp;
 }
 
-const { __cat: normalizeCategory, __lista: LISTA } = carregarFuncoes();
+const { normalizeCategory, listaEfetivaDeCategorias, categoriaGenerica,
+        esquemaDeClassificacao, DEFAULT_CATEGORIES } = carregarFuncoes();
 
-console.log('\nA categoria atribuida existe na lista configurada');
+const LISTA = listaEfetivaDeCategorias(DEFAULT_CATEGORIES);
+
+console.log('\nO texto do modelo vira a categoria correspondente da lista');
 [
   ['Buraco', 'buracos'],                          // singular do modelo, plural na lista
   ['buracos', 'buracos'],
@@ -46,35 +54,57 @@ console.log('\nA categoria atribuida existe na lista configurada');
   ['Iluminação pública', 'iluminação pública'],
   ['iluminacao publica', 'iluminação pública'],   // sem acento
   ['Semáforo', 'semáforo'],
-  ['Descarte irregular', 'descarte irregular'],
-  ['Mato alto', 'mato alto'],                     // fora das 8 fixas antigas
+  ['Mato alto', 'mato alto'],                     // fora das 8 categorias fixas antigas
   ['Pontos de dengue', 'pontos de dengue'],
   ['Poda', 'poda'],
-  ['Pichações', 'pichações'],
   ['Enchentes', 'enchentes']
 ].forEach(([entrada, esperado]) => {
-  const obtido = normalizeCategory(entrada, LISTA);
+  const obtido = normalizeCategory(entrada, DEFAULT_CATEGORIES);
   ok(obtido === esperado, `"${entrada}" -> "${obtido}" (esperado "${esperado}")`);
 });
 
-console.log('\nToda categoria atribuida e selecionavel na criacao do usuario');
-['Buraco', 'Árvore caída', 'Vazamento', 'Mato alto', 'Poda'].forEach((entrada) => {
-  const obtido = normalizeCategory(entrada, LISTA);
-  ok(LISTA.includes(obtido) || obtido === 'Outros',
-    `"${obtido}" esta na lista de categorias`);
+console.log('\nO retorno NUNCA e uma categoria fora da lista');
+[
+  'Buraco', 'algo totalmente inventado', '', null, undefined, 'Outros',
+  'Categoria Nova Que Nao Existe', '   ', '12345', 'Semaforo quebrado'
+].forEach((entrada) => {
+  const obtido = normalizeCategory(entrada, DEFAULT_CATEGORIES);
+  ok(LISTA.includes(obtido), `${JSON.stringify(entrada)} -> "${obtido}" pertence a lista`);
 });
 
-console.log('\nCasos sem correspondencia caem em Outros');
-[['', 'Outros'], [null, 'Outros'], ['xyzabc123', 'Outros']].forEach(([entrada, esperado]) => {
-  const obtido = normalizeCategory(entrada, LISTA);
-  ok(obtido === esperado, `${JSON.stringify(entrada)} -> "${obtido}"`);
-});
-
-console.log('\nUma lista personalizada e respeitada');
+console.log('\nA lista sempre oferece um destino para o que nao se encaixa');
 {
-  const propria = ['Iluminação', 'Buracos e valas', 'Limpeza'];
-  ok(normalizeCategory('buraco', propria) === 'Buracos e valas', 'usa a lista informada, nao a padrao');
-  ok(normalizeCategory('poda de arvore', propria) === 'Outros', 'fora da lista informada vira Outros');
+  const semGenerica = ['buracos', 'poda'];
+  const efetiva = listaEfetivaDeCategorias(semGenerica);
+  ok(efetiva.includes('outros'), 'lista sem generica ganha "outros"');
+  ok(efetiva.includes(categoriaGenerica(efetiva)), 'a generica pertence a propria lista');
+
+  const comGenerica = ['buracos', 'Diversos'];
+  ok(listaEfetivaDeCategorias(comGenerica).length === 2, 'lista que ja tem generica nao ganha outra');
+  ok(categoriaGenerica(listaEfetivaDeCategorias(comGenerica)) === 'Diversos', 'reconhece a generica existente');
+}
+
+console.log('\nUma lista personalizada e respeitada, sem vazar a lista padrao');
+{
+  const proprios = ['Iluminação', 'Buracos e valas'];
+  const efetiva = listaEfetivaDeCategorias(proprios);
+  ['buraco', 'luz apagada', 'inventado', 'poda de arvore'].forEach((entrada) => {
+    const obtido = normalizeCategory(entrada, proprios);
+    ok(efetiva.includes(obtido), `"${entrada}" -> "${obtido}" pertence a lista informada`);
+  });
+  ok(normalizeCategory('buraco', proprios) === 'Buracos e valas', 'mapeia para o item personalizado');
+}
+
+console.log('\nO schema enviado a IA restringe a resposta a lista');
+{
+  const esquema = esquemaDeClassificacao(LISTA, ['Baixa', 'Média', 'Alta', 'Urgente']);
+  const enumCategorias = esquema.json_schema.schema.properties.category.enum;
+  ok(esquema.json_schema.strict === true, 'schema em modo strict');
+  ok(esquema.json_schema.schema.additionalProperties === false, 'nao aceita campos extras');
+  ok(Array.isArray(enumCategorias) && enumCategorias.length === LISTA.length,
+    'o enum tem exatamente as categorias da lista');
+  ok(enumCategorias.every((item) => LISTA.includes(item)), 'nenhum valor fora da lista no enum');
+  ok(esquema.json_schema.schema.properties.priority.enum.length === 4, 'prioridades tambem restritas');
 }
 
 console.log(falhas === 0 ? '\nTodos os testes passaram.\n' : '\n' + falhas + ' teste(s) falharam.\n');

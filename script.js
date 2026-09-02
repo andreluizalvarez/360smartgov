@@ -668,15 +668,39 @@ window.smartgovIncidentes = {
   }
 };
 
+const TERMOS_CATEGORIA_GENERICA = ['outros', 'outras', 'diversos', 'geral', 'nao classificado'];
+const CATEGORIA_GENERICA_PADRAO = 'outros';
+
+function textoComparavel(valor) {
+  return (valor || '').toString().trim().toLowerCase()
+    .normalize('NFD').replace(/[̀-ͯ]/g, '');
+}
+
+// Toda ocorrencia precisa de uma categoria que exista na lista — e ela que
+// popula as permissoes por administrador. Por isso a lista sempre oferece um
+// destino para o que nao se encaixa em nenhuma categoria especifica.
+function garantirCategoriaGenerica(lista) {
+  const temGenerica = lista.some((item) => TERMOS_CATEGORIA_GENERICA.includes(textoComparavel(item)));
+  return temGenerica ? lista : [...lista, CATEGORIA_GENERICA_PADRAO];
+}
+
+// A categoria usada quando a classificacao nao retorna nada aproveitavel.
+function categoriaGenerica() {
+  const lista = getCategoryConfig();
+  return lista.find((item) => TERMOS_CATEGORIA_GENERICA.includes(textoComparavel(item)))
+    || CATEGORIA_GENERICA_PADRAO;
+}
+
 function getCategoryConfig() {
   const saved = localStorage.getItem(CATEGORY_CONFIG_KEY);
-  if (!saved) return DEFAULT_CATEGORIES.slice();
+  if (!saved) return garantirCategoriaGenerica(DEFAULT_CATEGORIES.slice());
 
   try {
     const parsed = JSON.parse(saved);
-    return Array.isArray(parsed) && parsed.length ? parsed : DEFAULT_CATEGORIES.slice();
+    const lista = Array.isArray(parsed) && parsed.length ? parsed : DEFAULT_CATEGORIES.slice();
+    return garantirCategoriaGenerica(lista);
   } catch (error) {
-    return DEFAULT_CATEGORIES.slice();
+    return garantirCategoriaGenerica(DEFAULT_CATEGORIES.slice());
   }
 }
 
@@ -1298,13 +1322,13 @@ async function classifyIncident(description, cep, street, number, neighborhood, 
     });
 
     if (!response.ok) {
-      return { category: 'Outros', priority: 'Média', title: '', description: '' };
+      return { category: categoriaGenerica(), priority: 'Média', title: '', description: '' };
     }
 
     const data = await response.json();
     console.debug('Response from /api/classify:', data);
     return {
-      category: data.category || 'Outros',
+      category: data.category || categoriaGenerica(),
       priority: data.priority || 'Média',
       title: data.title || '',
       description: data.description || '',
@@ -1312,7 +1336,7 @@ async function classifyIncident(description, cep, street, number, neighborhood, 
     };
   } catch (error) {
     console.error('Falha ao classificar a ocorrência:', error);
-    return { category: 'Outros', priority: 'Média', title: '', description: '' };
+    return { category: categoriaGenerica(), priority: 'Média', title: '', description: '' };
   }
 }
 
@@ -1380,7 +1404,7 @@ if (occurrenceForm) {
     showMessage(formMessage, 'Classificando a ocorrência...', false);
 
     try {
-      let classification = { category: 'Outros', priority: 'Média', title, description };
+      let classification = { category: categoriaGenerica(), priority: 'Média', title, description };
 
       let updatedFormData = new FormData(occurrenceForm);
       const cep = updatedFormData.get('cep');

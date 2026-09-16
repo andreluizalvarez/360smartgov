@@ -502,25 +502,36 @@ function createAdminUser(event) {
   }
 
   if (editingUserId) {
-    const index = users.findIndex((user) => user.id === editingUserId);
-    if (index === -1) {
-      showMessage(adminMessage, 'Usuário não encontrado.', true);
-      cancelEditUser();
-      return;
+    atualizarUsuarioNoServidor(editingUserId, { username, senha: password, role, allowedCategories });
+  } else {
+    criarUsuarioNoServidor({ username, senha: password, role, allowedCategories });
+  }
+}
+
+// A edicao tambem acontece no servidor: senha vazia mantem a atual.
+async function atualizarUsuarioNoServidor(userId, dados) {
+  try {
+    const resposta = await apiAutenticada(`/api/auth/usuarios/${encodeURIComponent(userId)}`, {
+      method: 'PUT',
+      body: JSON.stringify(dados)
+    });
+
+    const corpo = await resposta.json().catch(() => ({}));
+
+    if (!resposta.ok) {
+      showMessage(adminMessage, corpo.error || 'Não foi possível atualizar o usuário.', true);
+      return false;
     }
 
-    users[index] = {
-      ...users[index],
-      username,
-      role,
-      allowedCategories
-    };
-    saveAdminUsers(users);
+    await sincronizarUsuariosDoServidor();
     cancelEditUser();
     renderAdminUsers();
     showMessage(adminMessage, 'Usuário atualizado com sucesso.', false);
-  } else {
-    criarUsuarioNoServidor({ username, senha: password, role, allowedCategories });
+    return true;
+  } catch (error) {
+    console.error('Falha ao atualizar usuario:', error);
+    showMessage(adminMessage, 'Não foi possível falar com o servidor.', true);
+    return false;
   }
 }
 

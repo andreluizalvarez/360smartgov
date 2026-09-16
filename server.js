@@ -454,6 +454,14 @@ app.post('/api/auth/usuarios', auth.exigirAdminSistema, (req, res) => {
   return res.status(201).json(resultado);
 });
 
+app.put('/api/auth/usuarios/:id', auth.exigirAdminSistema, (req, res) => {
+  const resultado = auth.atualizarUsuario(req.params.id, req.body || {}, req.usuario.id);
+  if (resultado.erro) {
+    return res.status(resultado.status).json({ error: resultado.erro });
+  }
+  return res.json(resultado);
+});
+
 app.delete('/api/auth/usuarios/:id', auth.exigirAdminSistema, (req, res) => {
   const resultado = auth.removerUsuario(req.params.id, req.usuario.id);
   if (resultado.erro) {

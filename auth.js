@@ -259,6 +259,61 @@ function criarAuth({ diretorioDados }) {
     return { usuario: semSegredos(novo) };
   }
 
+  // Edita nome, papel, categorias e (opcionalmente) a senha de um usuario.
+  // Senha vazia mantem a atual. Nao deixa o sistema ficar sem admin nem o
+  // solicitante rebaixar o proprio perfil.
+  function atualizarUsuario(id, dados, solicitanteId) {
+    const usuarios = lerUsuarios();
+    const indice = usuarios.findIndex((item) => item.id === id);
+    if (indice === -1) return { erro: 'Usuário não encontrado.', status: 404 };
+
+    const atual = usuarios[indice];
+    const nome = (dados.username === undefined ? atual.username : dados.username).toString().trim();
+    if (!nome) return { erro: 'Informe o nome de usuário.', status: 400 };
+
+    if (usuarios.some((item) => item.id !== id && item.username.toLowerCase() === nome.toLowerCase())) {
+      return { erro: 'Já existe um usuário com esse nome.', status: 409 };
+    }
+
+    const papel = dados.role === undefined
+      ? atual.role
+      : (dados.role === PAPEL_ADMIN_SISTEMA ? PAPEL_ADMIN_SISTEMA : PAPEL_ADMIN_CATEGORIA);
+
+    if (atual.role === PAPEL_ADMIN_SISTEMA && papel !== PAPEL_ADMIN_SISTEMA) {
+      if (atual.id === solicitanteId) {
+        return { erro: 'Não é possível alterar o próprio perfil.', status: 400 };
+      }
+      if (!usuarios.some((item) => item.id !== id && item.role === PAPEL_ADMIN_SISTEMA)) {
+        return { erro: 'É preciso manter ao menos um administrador do sistema.', status: 400 };
+      }
+    }
+
+    const senha = (dados.senha || '').toString();
+    if (senha && senha.length < 6) {
+      return { erro: 'A senha precisa ter ao menos 6 caracteres.', status: 400 };
+    }
+
+    const atualizado = {
+      ...atual,
+      username: nome,
+      role: papel,
+      allowedCategories: papel === PAPEL_ADMIN_CATEGORIA
+        ? (Array.isArray(dados.allowedCategories) ? dados.allowedCategories : atual.allowedCategories || [])
+        : []
+    };
+
+    if (senha) {
+      const credenciais = gerarHash(senha);
+      atualizado.salt = credenciais.salt;
+      atualizado.hash = credenciais.hash;
+      atualizado.senhaPadrao = false;
+    }
+
+    usuarios[indice] = atualizado;
+    salvarUsuarios(usuarios);
+    return { usuario: semSegredos(atualizado) };
+  }
+
   function removerUsuario(id, solicitanteId) {
     const usuarios = lerUsuarios();
     const alvo = usuarios.find((item) => item.id === id);
@@ -312,6 +367,7 @@ function criarAuth({ diretorioDados }) {
     exigirAdminSistema,
     autenticar,
     criarUsuario,
+    atualizarUsuario,
     removerUsuario,
     alterarSenha,
     listarUsuarios,

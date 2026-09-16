@@ -182,6 +182,54 @@ async function esperarServidor() {
       ok(!config.corpo.categories.includes('tudo meu'), 'a configuracao seguiu intacta');
     }
 
+    console.log('\nEdicao de usuario');
+    {
+      const lista = (await pedir('GET', '/api/auth/usuarios', null, token)).corpo.usuarios;
+      const operador = lista.find((u) => u.username === 'operador');
+      const admin = lista.find((u) => u.username === 'admin');
+
+      const semToken = await pedir('PUT', '/api/auth/usuarios/' + operador.id, { username: 'x' });
+      ok(semToken.status === 401, 'PUT /api/auth/usuarios sem token responde 401');
+
+      const inexistente = await pedir('PUT', '/api/auth/usuarios/nao-existe', { username: 'x' }, token);
+      ok(inexistente.status === 404, 'id inexistente responde 404');
+
+      const repetido = await pedir('PUT', '/api/auth/usuarios/' + operador.id, { username: 'Admin' }, token);
+      ok(repetido.status === 409, 'renomear para um nome ja usado e recusado');
+
+      const curta = await pedir('PUT', '/api/auth/usuarios/' + operador.id, { senha: '123' }, token);
+      ok(curta.status === 400, 'senha nova curta e recusada');
+
+      const proprio = await pedir('PUT', '/api/auth/usuarios/' + admin.id, { role: 'category_admin' }, token);
+      ok(proprio.status === 400, 'nao permite rebaixar o proprio perfil');
+
+      const editado = await pedir('PUT', '/api/auth/usuarios/' + operador.id, {
+        username: 'operadora', role: 'category_admin', allowedCategories: ['poda']
+      }, token);
+      ok(editado.status === 200, 'edita nome e categorias');
+      ok(editado.corpo.usuario.username === 'operadora' && editado.corpo.usuario.allowedCategories[0] === 'poda', 'a resposta traz os dados novos');
+      ok(editado.corpo.usuario.hash === undefined && editado.corpo.usuario.salt === undefined, 'a resposta nao expoe o hash');
+
+      const depois = (await pedir('GET', '/api/auth/usuarios', null, token)).corpo.usuarios;
+      ok(depois.some((u) => u.username === 'operadora') && !depois.some((u) => u.username === 'operador'), 'a lista reflete a edicao');
+
+      const senhaMantida = await pedir('POST', '/api/auth/login', { username: 'operadora', password: 'segredo123' });
+      ok(senhaMantida.status === 200, 'sem senha no corpo a senha atual e mantida');
+
+      const trocaSenha = await pedir('PUT', '/api/auth/usuarios/' + operador.id, { senha: 'outraSenha9' }, token);
+      ok(trocaSenha.status === 200, 'admin redefine a senha de outro usuario');
+      const loginNovo = await pedir('POST', '/api/auth/login', { username: 'operadora', password: 'outraSenha9' });
+      ok(loginNovo.status === 200, 'a senha redefinida vale');
+
+      const promovido = await pedir('PUT', '/api/auth/usuarios/' + operador.id, { role: 'system_admin' }, token);
+      ok(promovido.status === 200 && promovido.corpo.usuario.allowedCategories.length === 0, 'promover a admin do sistema limpa as categorias');
+
+      const volta = await pedir('PUT', '/api/auth/usuarios/' + operador.id, {
+        username: 'operador', role: 'category_admin', allowedCategories: ['buracos']
+      }, token);
+      ok(volta.status === 200, 'volta ao perfil de categoria');
+    }
+
     console.log('\nRegras de cadastro e remocao');
     {
       const curta = await pedir('POST', '/api/auth/usuarios', { username: 'fraco', senha: '123' }, token);

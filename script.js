@@ -20,6 +20,23 @@ const phoneInput = document.getElementById('phone');
 const categoryInput = document.getElementById('category');
 const priorityInput = document.getElementById('priority');
 const photoInput = document.getElementById('photo');
+const photoCameraFallback = document.getElementById('photo-camera-fallback');
+const cameraOpenBtn = document.getElementById('camera-open');
+const photoPreview = document.getElementById('photo-preview');
+const photoPreviewImg = document.getElementById('photo-preview-img');
+const photoPreviewName = document.getElementById('photo-preview-name');
+const photoRemoveBtn = document.getElementById('photo-remove');
+const photoMessage = document.getElementById('photo-message');
+const cameraModal = document.getElementById('camera-modal');
+const cameraVideo = document.getElementById('camera-video');
+const cameraCanvas = document.getElementById('camera-canvas');
+const cameraCaptureBtn = document.getElementById('camera-capture');
+const cameraRetakeBtn = document.getElementById('camera-retake');
+const cameraUseBtn = document.getElementById('camera-use');
+const cameraSwitchBtn = document.getElementById('camera-switch');
+const cameraCancelBtn = document.getElementById('camera-cancel');
+const cameraMessage = document.getElementById('camera-message');
+let capturedPhotoFile = null;
 const categorySelect = document.getElementById('category-select');
 const prioritySelect = document.getElementById('priority-select');
 const categoryList = document.getElementById('category-list');
@@ -1528,6 +1545,279 @@ async function classifyImage(file) {
   }
 }
 
+// ---------- Foto: anexo de arquivo ou captura pela câmera ----------
+let cameraStream = null;
+let cameraFacingMode = 'environment';
+let cameraCapturedBlob = null;
+let photoPreviewUrl = null;
+
+function getSelectedPhotoFile() {
+  return photoInput?.files?.[0] || capturedPhotoFile || null;
+}
+
+function showPhotoPreview(file) {
+  if (!photoPreview || !photoPreviewImg) return;
+  if (photoPreviewUrl) {
+    URL.revokeObjectURL(photoPreviewUrl);
+    photoPreviewUrl = null;
+  }
+  if (!file) {
+    photoPreview.hidden = true;
+    photoPreviewImg.removeAttribute('src');
+    return;
+  }
+  photoPreviewUrl = URL.createObjectURL(file);
+  photoPreviewImg.src = photoPreviewUrl;
+  if (photoPreviewName) photoPreviewName.textContent = file.name || 'foto';
+  photoPreview.hidden = false;
+}
+
+// Coloca o arquivo capturado no input principal para que o envio e a validação
+// "required" continuem funcionando sem mudanças. Se o navegador não permitir,
+// guarda em memória e relaxa o required.
+function setPhotoFile(file) {
+  capturedPhotoFile = null;
+  let assigned = false;
+  if (photoInput && typeof DataTransfer !== 'undefined') {
+    try {
+      const transfer = new DataTransfer();
+      transfer.items.add(file);
+      photoInput.files = transfer.files;
+      assigned = photoInput.files?.length === 1;
+    } catch (error) {
+      assigned = false;
+    }
+  }
+  if (!assigned) {
+    capturedPhotoFile = file;
+    if (photoInput) photoInput.required = false;
+  } else if (photoInput) {
+    photoInput.required = true;
+  }
+  showPhotoPreview(file);
+  showMessage(photoMessage, '', false);
+}
+
+function clearPhotoFile() {
+  capturedPhotoFile = null;
+  if (photoInput) {
+    photoInput.value = '';
+    photoInput.required = true;
+  }
+  if (photoCameraFallback) photoCameraFallback.value = '';
+  showPhotoPreview(null);
+}
+
+function stopCameraStream() {
+  if (cameraStream) {
+    cameraStream.getTracks().forEach((track) => track.stop());
+    cameraStream = null;
+  }
+  if (cameraVideo) cameraVideo.srcObject = null;
+}
+
+function setCameraMode(mode) {
+  const captured = mode === 'captured';
+  if (cameraVideo) cameraVideo.hidden = captured;
+  if (cameraCanvas) cameraCanvas.hidden = !captured;
+  if (cameraCaptureBtn) cameraCaptureBtn.hidden = captured;
+  if (cameraRetakeBtn) cameraRetakeBtn.hidden = !captured;
+  if (cameraUseBtn) cameraUseBtn.hidden = !captured;
+  if (cameraSwitchBtn) cameraSwitchBtn.hidden = captured || cameraSwitchBtn.dataset.available !== 'true';
+}
+
+function cameraSupported() {
+  return Boolean(
+    navigator.mediaDevices &&
+      navigator.mediaDevices.getUserMedia &&
+      cameraModal &&
+      typeof cameraModal.showModal === 'function'
+  );
+}
+
+async function updateCameraSwitchAvailability() {
+  if (!cameraSwitchBtn) return;
+  try {
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const cameras = devices.filter((device) => device.kind === 'videoinput');
+    cameraSwitchBtn.dataset.available = cameras.length > 1 ? 'true' : 'false';
+  } catch (error) {
+    cameraSwitchBtn.dataset.available = 'false';
+  }
+  cameraSwitchBtn.hidden = cameraSwitchBtn.dataset.available !== 'true';
+}
+
+async function startCameraStream() {
+  stopCameraStream();
+  if (cameraMessage) cameraMessage.textContent = 'Abrindo a câmera...';
+  const attempts = [
+    {
+      video: { facingMode: { ideal: cameraFacingMode }, width: { ideal: 1600 }, height: { ideal: 1200 } },
+      audio: false,
+    },
+    { video: true, audio: false },
+  ];
+  let lastError = null;
+  for (const constraints of attempts) {
+    try {
+      cameraStream = await navigator.mediaDevices.getUserMedia(constraints);
+      break;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  if (!cameraStream) throw lastError || new Error('Câmera indisponível');
+  if (cameraVideo) {
+    cameraVideo.srcObject = cameraStream;
+    try {
+      await cameraVideo.play();
+    } catch (error) {
+      // autoplay pode ser bloqueado; o vídeo ainda renderiza o primeiro frame
+    }
+  }
+  if (cameraMessage) cameraMessage.textContent = '';
+  await updateCameraSwitchAvailability();
+}
+
+function openNativeCamera() {
+  if (photoCameraFallback) {
+    photoCameraFallback.click();
+  } else if (photoInput) {
+    photoInput.click();
+  }
+}
+
+function describeCameraError(error) {
+  const name = error?.name || '';
+  if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
+    return 'Permissão de câmera negada. Libere o acesso nas configurações do navegador ou anexe um arquivo.';
+  }
+  if (name === 'NotFoundError' || name === 'DevicesNotFoundError' || name === 'OverconstrainedError') {
+    return 'Nenhuma câmera foi encontrada neste dispositivo. Anexe um arquivo de imagem.';
+  }
+  if (name === 'NotReadableError' || name === 'TrackStartError') {
+    return 'A câmera está em uso por outro aplicativo. Feche-o e tente novamente.';
+  }
+  return 'Não foi possível acessar a câmera. Anexe um arquivo de imagem.';
+}
+
+async function openCameraModal() {
+  if (!cameraSupported()) {
+    openNativeCamera();
+    return;
+  }
+  cameraCapturedBlob = null;
+  setCameraMode('live');
+  if (!cameraModal.open) cameraModal.showModal();
+  try {
+    await startCameraStream();
+  } catch (error) {
+    stopCameraStream();
+    if (cameraModal.open) cameraModal.close();
+    const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+    if (isMobile && photoCameraFallback) {
+      // No celular a câmera nativa pode funcionar mesmo com getUserMedia bloqueado.
+      openNativeCamera();
+      return;
+    }
+    showMessage(photoMessage, describeCameraError(error), true);
+  }
+}
+
+function capturePhotoFrame() {
+  if (!cameraVideo || !cameraCanvas) return;
+  const width = cameraVideo.videoWidth;
+  const height = cameraVideo.videoHeight;
+  if (!width || !height) {
+    if (cameraMessage) cameraMessage.textContent = 'Aguarde a câmera carregar e tente novamente.';
+    return;
+  }
+  cameraCanvas.width = width;
+  cameraCanvas.height = height;
+  const ctx = cameraCanvas.getContext('2d');
+  ctx.drawImage(cameraVideo, 0, 0, width, height);
+  setCameraMode('captured');
+  if (cameraMessage) cameraMessage.textContent = '';
+  cameraCanvas.toBlob(
+    (blob) => {
+      cameraCapturedBlob = blob;
+      if (!blob && cameraMessage) {
+        cameraMessage.textContent = 'Falha ao processar a imagem. Tente capturar novamente.';
+      }
+    },
+    'image/jpeg',
+    0.9
+  );
+}
+
+function useCapturedPhoto() {
+  if (!cameraCapturedBlob) {
+    if (cameraMessage) cameraMessage.textContent = 'Processando a imagem, aguarde um instante...';
+    setTimeout(useCapturedPhoto, 150);
+    return;
+  }
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const file = new File([cameraCapturedBlob], `foto-${stamp}.jpg`, { type: 'image/jpeg' });
+  setPhotoFile(file);
+  stopCameraStream();
+  if (cameraModal?.open) cameraModal.close();
+}
+
+if (cameraOpenBtn) {
+  cameraOpenBtn.addEventListener('click', openCameraModal);
+}
+
+if (cameraCaptureBtn) cameraCaptureBtn.addEventListener('click', capturePhotoFrame);
+if (cameraRetakeBtn) {
+  cameraRetakeBtn.addEventListener('click', () => {
+    cameraCapturedBlob = null;
+    setCameraMode('live');
+  });
+}
+if (cameraUseBtn) cameraUseBtn.addEventListener('click', useCapturedPhoto);
+if (cameraSwitchBtn) {
+  cameraSwitchBtn.addEventListener('click', async () => {
+    cameraFacingMode = cameraFacingMode === 'environment' ? 'user' : 'environment';
+    try {
+      await startCameraStream();
+    } catch (error) {
+      if (cameraMessage) cameraMessage.textContent = describeCameraError(error);
+    }
+  });
+}
+if (cameraCancelBtn) {
+  cameraCancelBtn.addEventListener('click', () => {
+    stopCameraStream();
+    if (cameraModal?.open) cameraModal.close();
+  });
+}
+if (cameraModal) {
+  // Fecha com Esc: garante que a câmera seja desligada.
+  cameraModal.addEventListener('close', stopCameraStream);
+  cameraModal.addEventListener('cancel', stopCameraStream);
+}
+
+if (photoCameraFallback) {
+  photoCameraFallback.addEventListener('change', () => {
+    const file = photoCameraFallback.files?.[0];
+    if (file) setPhotoFile(file);
+  });
+}
+
+if (photoInput) {
+  photoInput.addEventListener('change', () => {
+    const file = photoInput.files?.[0];
+    capturedPhotoFile = null;
+    photoInput.required = true;
+    showPhotoPreview(file || null);
+    if (file) showMessage(photoMessage, '', false);
+  });
+}
+
+if (photoRemoveBtn) {
+  photoRemoveBtn.addEventListener('click', clearPhotoFile);
+}
+
 function readFileAsDataUrl(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -1578,7 +1868,7 @@ if (occurrenceForm) {
       description = updatedFormData.get('description');
       title = updatedFormData.get('title');
 
-      const photoFile = photoInput?.files?.[0];
+      const photoFile = getSelectedPhotoFile();
       let imgResult = null;
       if (photoFile) {
         imgResult = await classifyImage(photoFile);

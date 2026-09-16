@@ -719,3 +719,93 @@ select.status-select {
     align-items: flex-start;
   }
 }
+
+/* Foto: anexar arquivo ou capturar pela câmera */
+.photo-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  align-items: stretch;
+}
+
+.photo-controls input[type="file"] {
+  flex: 1 1 240px;
+  min-width: 0;
+}
+
+#registro .photo-controls input[type="file"] {
+  width: auto;
+}
+
+#registro .btn-secondary.photo-camera-button {
+  width: auto;
+  flex: 1 1 200px;
+  padding: 0.7rem 1rem;
+  white-space: nowrap;
+}
+
+.photo-preview {
+  display: flex;
+  gap: 0.8rem;
+  align-items: center;
+  margin-top: 0.4rem;
+  padding: 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
+.photo-preview img {
+  width: 96px;
+  height: 96px;
+  object-fit: cover;
+  border-radius: 10px;
+  flex-shrink: 0;
+}
+
+.photo-preview-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  min-width: 0;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+.photo-preview-info span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#registro .btn.photo-remove-button {
+  width: auto;
+  align-self: flex-start;
+  padding: 0.4rem 0.8rem;
+  font-size: 0.85rem;
+}
+
+.camera-modal {
+  width: min(640px, calc(100vw - 2rem));
+}
+
+.camera-stage {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  margin-bottom: 1rem;
+  border-radius: 14px;
+  overflow: hidden;
+  background: #0f2733;
+}
+
+.camera-stage video,
+.camera-stage canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+[hidden] {
+  display: none !important;
+}

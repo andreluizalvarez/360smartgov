@@ -54,7 +54,21 @@
             </div>
             <div class="field full">
               <label for="photo">Foto (obrigatória)</label>
-              <input id="photo" name="photo" type="file" accept="image/*" required />
+              <div class="photo-controls">
+                <input id="photo" name="photo" type="file" accept="image/*" required />
+                <button type="button" id="camera-open" class="btn btn-secondary photo-camera-button">
+                  <span aria-hidden="true">📷</span> Tirar foto com a câmera
+                </button>
+              </div>
+              <input id="photo-camera-fallback" type="file" accept="image/*" capture="environment" hidden />
+              <div id="photo-preview" class="photo-preview" hidden>
+                <img id="photo-preview-img" alt="Pré-visualização da foto selecionada" />
+                <div class="photo-preview-info">
+                  <span id="photo-preview-name"></span>
+                  <button type="button" id="photo-remove" class="btn btn-ghost photo-remove-button">Remover foto</button>
+                </div>
+              </div>
+              <span id="photo-message" class="form-message" role="status" aria-live="polite"></span>
             </div>
             <div class="field full">
               <label>Localização</label>
@@ -145,6 +159,24 @@
           <button type="button" id="geo-modal-manual" class="btn btn-ghost">Preencher endereço manualmente</button>
         </div>
         <p id="geo-modal-message" class="geo-modal-message" role="status" aria-live="polite"></p>
+      </div>
+    </dialog>
+
+    <dialog id="camera-modal" class="geo-modal camera-modal" aria-labelledby="camera-modal-title">
+      <div class="geo-modal-content">
+        <h3 id="camera-modal-title">Tirar foto</h3>
+        <div class="camera-stage">
+          <video id="camera-video" autoplay playsinline muted></video>
+          <canvas id="camera-canvas" hidden></canvas>
+        </div>
+        <div class="geo-modal-actions">
+          <button type="button" id="camera-capture" class="btn btn-secondary">Capturar</button>
+          <button type="button" id="camera-retake" class="btn btn-secondary" hidden>Tirar outra</button>
+          <button type="button" id="camera-use" class="btn btn-secondary" hidden>Usar esta foto</button>
+          <button type="button" id="camera-switch" class="btn btn-ghost" hidden>Alternar câmera</button>
+          <button type="button" id="camera-cancel" class="btn btn-ghost">Cancelar</button>
+        </div>
+        <p id="camera-message" class="geo-modal-message" role="status" aria-live="polite"></p>
       </div>
     </dialog>
 

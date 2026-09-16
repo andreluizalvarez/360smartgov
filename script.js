@@ -216,24 +216,24 @@ function createDefaultSystemAdmin() {
   return {
     id: crypto.randomUUID(),
     username: 'admin',
-    password: 'admin123',
     role: SYSTEM_ADMIN_ROLE,
     allowedCategories: [],
     createdAt: new Date().toISOString()
   };
 }
 
+// A lista local e um espelho do que o servidor devolve, sem senhas. Por isso
+// a senha nao pode ser exigida aqui: se fosse, todo usuario vindo do servidor
+// seria descartado e a tela mostraria so o admin padrao.
 function normalizeAdminUser(user) {
   if (!user || typeof user !== 'object') return null;
 
   const username = (user.username || '').toString().trim();
-  const password = (user.password || '').toString();
-  if (!username || !password) return null;
+  if (!username) return null;
 
   return {
     id: user.id || crypto.randomUUID(),
     username,
-    password,
     role: user.role === SYSTEM_ADMIN_ROLE ? SYSTEM_ADMIN_ROLE : CATEGORY_ADMIN_ROLE,
     allowedCategories: Array.isArray(user.allowedCategories)
       ? user.allowedCategories.filter(Boolean).map((item) => item.toString().trim())
@@ -512,7 +512,6 @@ function createAdminUser(event) {
     users[index] = {
       ...users[index],
       username,
-      password: password || users[index].password,
       role,
       allowedCategories
     };
@@ -605,7 +604,7 @@ function startEditUser(userId) {
 
   if (newAdminUsernameInput) newAdminUsernameInput.value = user.username;
   if (newAdminPasswordInput) {
-    newAdminPasswordInput.value = user.password;
+    newAdminPasswordInput.value = '';
     newAdminPasswordInput.removeAttribute('required');
     newAdminPasswordInput.placeholder = 'Deixe vazio para manter a senha atual';
   }

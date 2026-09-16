@@ -2167,15 +2167,17 @@ const tabOccurrences = document.getElementById('tab-occurrences');
 const tabCategories = document.getElementById('tab-categories');
 const tabPriorities = document.getElementById('tab-priorities');
 const tabUsers = document.getElementById('tab-users');
+const tabPassword = document.getElementById('tab-password');
 const panelOccurrences = document.getElementById('panel-occurrences');
 const panelCategories = document.getElementById('panel-categories');
 const panelPriorities = document.getElementById('panel-priorities');
 const panelUsers = document.getElementById('panel-users');
+const panelPassword = document.getElementById('panel-password');
 
 function switchTab(tab) {
   // reset active
-  [tabOccurrences, tabCategories, tabPriorities, tabUsers].forEach((b) => b && b.classList.remove('active'));
-  [panelOccurrences, panelCategories, panelPriorities, panelUsers].forEach((p) => p && p.classList.add('hidden'));
+  [tabOccurrences, tabCategories, tabPriorities, tabUsers, tabPassword].forEach((b) => b && b.classList.remove('active'));
+  [panelOccurrences, panelCategories, panelPriorities, panelUsers, panelPassword].forEach((p) => p && p.classList.add('hidden'));
 
   if (!isSystemAdmin() && (tab === 'categories' || tab === 'priorities' || tab === 'users')) {
     tab = 'occurrences';
@@ -2206,12 +2208,17 @@ function switchTab(tab) {
     tabUsers.classList.add('active');
     panelUsers.classList.remove('hidden');
   }
+  if (tab === 'password') {
+    tabPassword.classList.add('active');
+    panelPassword.classList.remove('hidden');
+  }
 }
 
 if (tabOccurrences) tabOccurrences.addEventListener('click', () => switchTab('occurrences'));
 if (tabCategories) tabCategories.addEventListener('click', () => switchTab('categories'));
 if (tabPriorities) tabPriorities.addEventListener('click', () => switchTab('priorities'));
 if (tabUsers) tabUsers.addEventListener('click', () => switchTab('users'));
+if (tabPassword) tabPassword.addEventListener('click', () => switchTab('password'));
 
 if (newAdminRoleSelect) {
   newAdminRoleSelect.addEventListener('change', updateAdminRoleUi);

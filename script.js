@@ -2217,6 +2217,9 @@ function switchTab(tab) {
   if (tab === 'users') {
     tabUsers.classList.add('active');
     panelUsers.classList.remove('hidden');
+    sincronizarUsuariosDoServidor().then((ok) => {
+      if (ok) renderAdminUsers();
+    });
   }
   if (tab === 'password') {
     tabPassword.classList.add('active');
@@ -2649,10 +2652,38 @@ if (year) {
 
 getAdminUsers();
 
-const restoredUser = restoreAdminSession();
-if (restoredUser && adminDashboard && adminLogin) {
-  showAdminDashboard(restoredUser);
-  showMessage(loginMessage, `Sessão restaurada para ${restoredUser.username}.`, false);
+// Ao recarregar a pagina, a sessao e validada no servidor e a lista de
+// usuarios e ressincronizada antes de abrir o painel. Antes disso o painel
+// era restaurado so com o espelho local, que podia estar desatualizado e
+// mostrar apenas o admin.
+async function restaurarSessaoDoServidor() {
+  if (!adminDashboard || !adminLogin || !getToken()) return false;
+
+  try {
+    const resposta = await apiAutenticada('/api/auth/me');
+    if (!resposta.ok) return false;
+
+    const corpo = await resposta.json().catch(() => ({}));
+    if (!corpo.usuario) return false;
+
+    await sincronizarUsuariosDoServidor();
+    showAdminDashboard(corpo.usuario);
+    showMessage(loginMessage, `Sessão restaurada para ${corpo.usuario.username}.`, false);
+    return true;
+  } catch (error) {
+    console.warn('[auth] Nao foi possivel restaurar a sessao:', error);
+    return false;
+  }
 }
+
+restaurarSessaoDoServidor().then((restaurada) => {
+  if (restaurada) return;
+  // Sem sessao valida no servidor, garante o estado de login.
+  const sessaoLocal = restoreAdminSession();
+  if (sessaoLocal) {
+    persistAdminSession(null);
+    setToken('');
+  }
+});
 
 refreshDashboard();

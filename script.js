@@ -1,4 +1,4 @@
-const STORAGE_KEY = 'smartgov360-incidents-v1';
+﻿const STORAGE_KEY = 'smartgov360-incidents-v1';
 const STORAGE_BACKUP_KEY = 'smartgov360-incidents-v1-backup';
 const ADMIN_USERS_KEY = 'smartgov360-admin-users-v1';
 const ADMIN_SESSION_KEY = 'smartgov360-admin-session-v1';
@@ -1742,10 +1742,12 @@ function capturePhotoFrame() {
     if (cameraMessage) cameraMessage.textContent = 'Aguarde a câmera carregar e tente novamente.';
     return;
   }
-  cameraCanvas.width = width;
-  cameraCanvas.height = height;
+  // Limita a captura ao tamanho usado no envio: economiza memoria no celular.
+  const escala = Math.min(1, FOTO_LADO_MAXIMO / Math.max(width, height));
+  cameraCanvas.width = Math.round(width * escala);
+  cameraCanvas.height = Math.round(height * escala);
   const ctx = cameraCanvas.getContext('2d');
-  ctx.drawImage(cameraVideo, 0, 0, width, height);
+  ctx.drawImage(cameraVideo, 0, 0, cameraCanvas.width, cameraCanvas.height);
   setCameraMode('captured');
   if (cameraMessage) cameraMessage.textContent = '';
   cameraCanvas.toBlob(
@@ -1756,7 +1758,7 @@ function capturePhotoFrame() {
       }
     },
     'image/jpeg',
-    0.9
+    FOTO_QUALIDADE
   );
 }
 
@@ -1828,6 +1830,69 @@ if (photoRemoveBtn) {
   photoRemoveBtn.addEventListener('click', clearPhotoFile);
 }
 
+// Reduz a foto antes de enviar e guardar. A ocorrencia e gravada no
+// armazenamento do navegador (limite de ~5 MB por site) com a foto em
+// base64: uma foto de celular de 4-8 MB estoura o limite e a gravacao falha.
+// Ate 1024 px no maior lado e JPEG 0.75 costuma ficar em 80-200 KB.
+const FOTO_LADO_MAXIMO = 1024;
+const FOTO_QUALIDADE = 0.75;
+
+function carregarImagem(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      resolve(img);
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error('Imagem inválida'));
+    };
+    img.src = url;
+  });
+}
+
+async function reduzirFoto(file, { ladoMaximo = FOTO_LADO_MAXIMO, qualidade = FOTO_QUALIDADE } = {}) {
+  if (!file || !file.type?.startsWith('image/')) return file;
+
+  try {
+    const img = await carregarImagem(file);
+    const largura = img.naturalWidth || img.width;
+    const altura = img.naturalHeight || img.height;
+    if (!largura || !altura) return file;
+
+    const escala = Math.min(1, ladoMaximo / Math.max(largura, altura));
+    const jaPequena = escala === 1 && file.type === 'image/jpeg' && file.size <= 400 * 1024;
+    if (jaPequena) return file;
+
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(largura * escala);
+    canvas.height = Math.round(altura * escala);
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', qualidade));
+    if (!blob) return file;
+
+    const nome = (file.name || 'foto').replace(/\.[^.]+$/, '') + '.jpg';
+    return new File([blob], nome, { type: 'image/jpeg', lastModified: Date.now() });
+  } catch (error) {
+    console.warn('[foto] Nao foi possivel reduzir a imagem, usando o original:', error);
+    return file;
+  }
+}
+
+function erroDeEspaco(error) {
+  return Boolean(
+    error &&
+      (error.name === 'QuotaExceededError' ||
+        error.name === 'NS_ERROR_DOM_QUOTA_REACHED' ||
+        error.code === 22 ||
+        error.code === 1014)
+  );
+}
+
 function readFileAsDataUrl(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -1878,7 +1943,11 @@ if (occurrenceForm) {
       description = updatedFormData.get('description');
       title = updatedFormData.get('title');
 
-      const photoFile = getSelectedPhotoFile();
+      const fotoOriginal = getSelectedPhotoFile();
+      const photoFile = fotoOriginal ? await reduzirFoto(fotoOriginal) : null;
+      if (fotoOriginal && photoFile !== fotoOriginal) {
+        console.debug('[foto] reduzida de', fotoOriginal.size, 'para', photoFile.size, 'bytes');
+      }
       let imgResult = null;
       if (photoFile) {
         imgResult = await classifyImage(photoFile);
@@ -1951,7 +2020,18 @@ if (occurrenceForm) {
         createdAt: new Date().toISOString()
       };
 
-      sessionStorage.setItem('smartgov360-preview-incident', JSON.stringify(incident));
+      try {
+        sessionStorage.setItem('smartgov360-preview-incident', JSON.stringify(incident));
+      } catch (error) {
+        if (!erroDeEspaco(error)) throw error;
+        console.error('[foto] Sem espaco no navegador para a ocorrencia:', error);
+        showMessage(
+          formMessage,
+          'A foto é grande demais para o armazenamento do navegador. Tente uma foto menor ou tire outra pela câmera.',
+          true
+        );
+        return;
+      }
       window.location.href = 'preview.html';
     } catch (error) {
       console.error('Erro ao enviar a ocorrência:', error);

@@ -33,6 +33,35 @@ function saveIncidents(incidents) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(incidents));
 }
 
+function erroDeEspaco(error) {
+  return Boolean(
+    error &&
+      (error.name === 'QuotaExceededError' ||
+        error.name === 'NS_ERROR_DOM_QUOTA_REACHED' ||
+        error.code === 22 ||
+        error.code === 1014)
+  );
+}
+
+// Ultimo recurso quando o armazenamento esta cheio: encolhe a foto desta
+// ocorrencia e tenta gravar de novo, em vez de perder o registro.
+function encolherFotoDataUrl(dataUrl, ladoMaximo = 800, qualidade = 0.7) {
+  return new Promise((resolve) => {
+    if (!dataUrl) return resolve('');
+    const img = new Image();
+    img.onload = () => {
+      const escala = Math.min(1, ladoMaximo / Math.max(img.width, img.height));
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.round(img.width * escala);
+      canvas.height = Math.round(img.height * escala);
+      canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+      resolve(canvas.toDataURL('image/jpeg', qualidade));
+    };
+    img.onerror = () => resolve('');
+    img.src = dataUrl;
+  });
+}
+
 function formatPreviewAddress(data) {
   const parts = [];
   if (data.street) parts.push(data.street);
@@ -174,7 +203,31 @@ async function confirmPreview() {
 
   const incidents = getIncidents();
   incidents.unshift(updatedData);
-  saveIncidents(incidents);
+
+  try {
+    saveIncidents(incidents);
+  } catch (error) {
+    if (!erroDeEspaco(error)) {
+      console.error('Erro ao gravar a ocorrência:', error);
+      showPreviewMessage('Não foi possível gravar a ocorrência. Tente novamente.', true);
+      return;
+    }
+
+    console.warn('[incidentes] Sem espaco: tentando gravar com a foto menor.');
+    const menor = { ...updatedData, photoDataUrl: await encolherFotoDataUrl(updatedData.photoDataUrl) };
+    incidents[0] = menor;
+    try {
+      saveIncidents(incidents);
+    } catch (segundoErro) {
+      console.error('[incidentes] Sem espaco mesmo com a foto menor:', segundoErro);
+      showPreviewMessage(
+        'O armazenamento do navegador está cheio. Não foi possível gravar a ocorrência.',
+        true
+      );
+      return;
+    }
+  }
+
   await notifyIncidentOpened(updatedData);
   sessionStorage.removeItem(PREVIEW_KEY);
   window.location.href = 'index.html';

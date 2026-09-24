@@ -1,18 +1,22 @@
-// Regressao: um admin restrito a uma categoria nao pode apagar as ocorrencias
-// das demais ao abrir o painel.
+// Ocorrencias gravadas no servidor.
 //
-// O bug original: refreshDashboard() filtrava as ocorrencias por permissao e
-// repassava a lista filtrada a initMap() -> ensureIncidentCoordinates(), que
-// gravava esse subconjunto por cima da base inteira. Quando o filtro nao casava
-// com nada, gravava [] e apagava tudo.
+// Antes disto cada ocorrencia vivia so no localStorage do navegador de quem a
+// abriu, e um admin restrito a uma categoria chegou a apagar as demais ao
+// abrir o painel (a lista filtrada era gravada por cima da base). Com a base
+// no servidor esse bug deixa de existir por construcao: o cliente nunca grava
+// a lista inteira, so envia alteracoes de uma ocorrencia por vez, e o servidor
+// confere a permissao por categoria em cada uma.
 //
 // Rodar com: node testes/incidentes.test.js
+const { spawn } = require('child_process');
+const http = require('http');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
-const vm = require('vm');
 
 const RAIZ = path.join(__dirname, '..');
-const CHAVE = 'smartgov360-incidents-v1';
+const DIR_DADOS = path.join(RAIZ, 'dados');
+const PORTA = 3996;
 
 let falhas = 0;
 function ok(condicao, mensagem) {
@@ -20,109 +24,192 @@ function ok(condicao, mensagem) {
   if (!condicao) falhas += 1;
 }
 
-function criarStorage() {
-  const dados = new Map();
-  return {
-    getItem: (k) => (dados.has(k) ? dados.get(k) : null),
-    setItem: (k, v) => dados.set(k, String(v)),
-    removeItem: (k) => dados.delete(k),
-    clear: () => dados.clear()
-  };
-}
-
-const elementoFalso = () => ({
-  value: '', textContent: '', innerHTML: '', style: {}, dataset: {}, files: [], checked: false,
-  classList: { add() {}, remove() {}, toggle() {}, contains: () => false },
-  addEventListener() {}, removeEventListener() {}, appendChild() {},
-  querySelector: () => null, querySelectorAll: () => [], closest: () => null,
-  insertAdjacentHTML() {}
-});
-
-// Carrega o script.js real num contexto com stubs de DOM.
-function carregarScript() {
-  const sandbox = {
-    console: { log() {}, warn() {}, error() {}, debug() {} },
-    localStorage: criarStorage(),
-    sessionStorage: criarStorage(),
-    crypto: { randomUUID: () => 'id-' + Math.random().toString(36).slice(2, 10) },
-    navigator: { userAgent: 'node', geolocation: null, permissions: null },
-    location: { href: '' },
-    fetch: async () => ({ ok: false, json: async () => ({}) }),
-    setTimeout, clearTimeout, setInterval, clearInterval,
-    document: {
-      getElementById: () => null, querySelector: () => null, querySelectorAll: () => [],
-      createElement: elementoFalso, addEventListener() {}, body: elementoFalso()
+function pedir(metodo, caminho, corpo, token) {
+  return new Promise((resolve, reject) => {
+    const dados = corpo ? JSON.stringify(corpo) : null;
+    const headers = {};
+    if (dados) {
+      headers['Content-Type'] = 'application/json';
+      headers['Content-Length'] = Buffer.byteLength(dados);
     }
-  };
-  sandbox.window = sandbox;
-  sandbox.globalThis = sandbox;
+    if (token) headers.Authorization = 'Bearer ' + token;
 
-  // googleMapsLoaded e `let`, inacessivel de fora; este trecho expoe o cenario.
-  const codigo = fs.readFileSync(path.join(RAIZ, 'script.js'), 'utf8')
-    + '\n;globalThis.__abrirMapaComo = async function (listaFiltrada) {'
-    + '\n  googleMapsLoaded = true;'
-    + '\n  return ensureIncidentCoordinates(listaFiltrada);'
-    + '\n};';
-
-  vm.createContext(sandbox);
-  vm.runInContext(codigo, sandbox, { filename: 'script.js' });
-  return sandbox;
+    const req = http.request(
+      { host: '127.0.0.1', port: PORTA, path: caminho, method: metodo, headers },
+      (res) => {
+        let bruto = '';
+        res.on('data', (parte) => { bruto += parte; });
+        res.on('end', () => {
+          let json = null;
+          try { json = JSON.parse(bruto); } catch (error) { json = null; }
+          resolve({ status: res.statusCode, corpo: json });
+        });
+      }
+    );
+    req.on('error', reject);
+    if (dados) req.write(dados);
+    req.end();
+  });
 }
 
-const baseDuasCategorias = () => ([
-  { id: 'a1', title: 'Buraco na via', category: 'Buraco', priority: 'Urgente',
-    status: 'Em análise', latitude: '-23.5', longitude: '-46.6', createdAt: new Date().toISOString() },
-  { id: 'b2', title: 'Poste apagado', category: 'Iluminação pública', priority: 'Alta',
-    status: 'Em análise', latitude: '-23.4', longitude: '-46.7', createdAt: new Date().toISOString() }
-]);
-
-const salvos = (s) => JSON.parse(s.localStorage.getItem(CHAVE) || '[]');
+async function esperarServidor() {
+  for (let i = 0; i < 60; i++) {
+    try {
+      const r = await pedir('GET', '/api/config');
+      if (r.status === 200) return;
+    } catch (error) { /* ainda subindo */ }
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  throw new Error('servidor nao respondeu');
+}
 
 (async () => {
-  console.log('\nCausa raiz: lista filtrada por permissao nao sobrescreve a base');
-  {
-    const s = carregarScript();
-    s.localStorage.setItem(CHAVE, JSON.stringify(baseDuasCategorias()));
-    // Admin de "Buraco" abre o painel: enxerga so a sua ocorrencia.
-    await s.__abrirMapaComo([baseDuasCategorias()[0]]);
-    const depois = salvos(s);
-    ok(depois.length === 2, 'as 2 ocorrencias sobrevivem (ficaram ' + depois.length + ')');
-    ok(depois.some((i) => i.id === 'b2'), 'a ocorrencia de outra categoria continua salva');
-  }
-  {
-    const s = carregarScript();
-    s.localStorage.setItem(CHAVE, JSON.stringify(baseDuasCategorias()));
-    // Categoria do usuario nao casa com nenhuma ocorrencia: filtro devolve [].
-    await s.__abrirMapaComo([]);
-    const depois = salvos(s);
-    ok(depois.length === 2, 'filtro sem resultado nao apaga nada (ficaram ' + depois.length + ')');
+  // Preserva os dados reais: o teste roda com um diretorio limpo.
+  const backup = fs.existsSync(DIR_DADOS)
+    ? fs.mkdtempSync(path.join(os.tmpdir(), 'dados-'))
+    : null;
+  if (backup) {
+    fs.cpSync(DIR_DADOS, backup, { recursive: true });
+    fs.rmSync(DIR_DADOS, { recursive: true, force: true });
   }
 
-  console.log('\nRede de seguranca: gravacao vazia acidental e recusada');
-  {
-    const s = carregarScript();
-    s.localStorage.setItem(CHAVE, JSON.stringify(baseDuasCategorias()));
-    const resultado = s.saveIncidents([]);
-    ok(resultado === false, 'saveIncidents([]) e recusado');
-    ok(salvos(s).length === 2, 'a base continua intacta');
-  }
+  const servidor = spawn(process.execPath, ['server.js'], {
+    cwd: RAIZ,
+    env: { ...process.env, PORT: String(PORTA), ADMIN_INITIAL_PASSWORD: 'admin123' },
+    stdio: ['ignore', 'pipe', 'pipe']
+  });
+  servidor.stderr.on('data', (d) => console.log('[servidor]', d.toString().trim().slice(0, 200)));
 
-  console.log('\nLimpar tudo pelo painel continua permitido');
-  {
-    const s = carregarScript();
-    s.localStorage.setItem(CHAVE, JSON.stringify(baseDuasCategorias()));
-    const resultado = s.saveIncidents([], { permitirVazio: true });
-    ok(resultado === true && salvos(s).length === 0, 'limpeza explicita funciona');
-  }
+  const restaurar = () => {
+    servidor.kill();
+    try {
+      fs.rmSync(DIR_DADOS, { recursive: true, force: true });
+      if (backup) {
+        fs.cpSync(backup, DIR_DADOS, { recursive: true });
+        fs.rmSync(backup, { recursive: true, force: true });
+      }
+    } catch (error) {
+      console.error('falha ao restaurar os dados:', error);
+    }
+  };
 
-  console.log('\nBackup e restauracao');
-  {
-    const s = carregarScript();
-    s.localStorage.setItem(CHAVE, JSON.stringify(baseDuasCategorias()));
-    s.saveIncidents([baseDuasCategorias()[0]]);  // reduz a base
-    ok(s.window.smartgovIncidentes.verBackup().length === 2, 'backup guardou a versao anterior');
-    s.window.smartgovIncidentes.restaurarBackup();
-    ok(salvos(s).length === 2, 'restaurarBackup() devolve as ocorrencias');
+  try {
+    await esperarServidor();
+
+    const login = await pedir('POST', '/api/auth/login', { username: 'admin', password: 'admin123' });
+    const token = login.corpo.token;
+
+    console.log('\nAbertura pelo cidadao, sem login');
+    let buraco;
+    let poste;
+    {
+      const vazia = await pedir('POST', '/api/incidentes', { name: 'x' });
+      ok(vazia.status === 400, 'ocorrencia sem resumo nem descricao e recusada');
+
+      const r1 = await pedir('POST', '/api/incidentes', {
+        name: 'Maria', email: 'maria@email.com', title: 'Buraco na via', category: 'Buraco',
+        priority: 'Urgente', description: 'Buraco grande', latitude: '-23.5', longitude: '-46.6',
+        photoDataUrl: 'data:image/jpeg;base64,/9j/4AAQ', status: 'Concluída', id: 'forjado'
+      });
+      ok(r1.status === 201, 'POST /api/incidentes grava sem token');
+      buraco = r1.corpo.incidente;
+      ok(buraco.id !== 'forjado' && buraco.status === 'Em análise', 'id e status iniciais sao definidos pelo servidor');
+      ok(buraco.photoDataUrl.startsWith('data:image/jpeg'), 'a foto e guardada');
+
+      const r2 = await pedir('POST', '/api/incidentes', {
+        title: 'Poste apagado', category: 'Iluminação pública', priority: 'Alta', description: 'Sem luz'
+      });
+      poste = r2.corpo.incidente;
+      ok(r2.status === 201 && poste.id, 'segunda ocorrencia gravada');
+
+      const fotoInvalida = await pedir('POST', '/api/incidentes', { title: 'x', photoDataUrl: 'http://evil/x.jpg' });
+      ok(fotoInvalida.status === 400, 'foto que nao e data URL de imagem e recusada');
+
+      const fotoGrande = await pedir('POST', '/api/incidentes', {
+        title: 'x', photoDataUrl: 'data:image/jpeg;base64,' + 'A'.repeat(2 * 1024 * 1024 + 10)
+      });
+      ok(fotoGrande.status === 413, 'foto acima do limite responde 413');
+
+      const arquivo = JSON.parse(fs.readFileSync(path.join(DIR_DADOS, 'incidentes.json'), 'utf8'));
+      ok(arquivo.length === 2 && arquivo[0].id === poste.id, 'dados/incidentes.json guarda as ocorrencias, mais recente primeiro');
+    }
+
+    console.log('\nLeitura exige sessao');
+    {
+      const semToken = await pedir('GET', '/api/incidentes');
+      ok(semToken.status === 401, 'GET /api/incidentes sem token responde 401');
+
+      const lista = await pedir('GET', '/api/incidentes', null, token);
+      ok(lista.status === 200 && lista.corpo.incidentes.length === 2, 'admin do sistema ve as 2 ocorrencias');
+    }
+
+    console.log('\nAdmin de categoria so enxerga e altera a sua categoria');
+    let tokenOperador;
+    {
+      const criado = await pedir('POST', '/api/auth/usuarios', {
+        username: 'operador', senha: 'segredo123', role: 'category_admin', allowedCategories: ['buraco']
+      }, token);
+      ok(criado.status === 201, 'usuario de categoria criado');
+      const loginOp = await pedir('POST', '/api/auth/login', { username: 'operador', password: 'segredo123' });
+      tokenOperador = loginOp.corpo.token;
+
+      const lista = await pedir('GET', '/api/incidentes', null, tokenOperador);
+      ok(lista.corpo.incidentes.length === 1 && lista.corpo.incidentes[0].id === buraco.id, 'lista filtrada pela categoria (sem diferenciar acento e caixa)');
+
+      const outra = await pedir('PUT', '/api/incidentes/' + poste.id, { status: 'Concluída' }, tokenOperador);
+      ok(outra.status === 403, 'alterar ocorrencia de outra categoria responde 403');
+
+      const mover = await pedir('PUT', '/api/incidentes/' + buraco.id, { category: 'Iluminação pública' }, tokenOperador);
+      ok(mover.status === 403, 'nao pode mover a ocorrencia para categoria que nao enxerga');
+
+      const propria = await pedir('PUT', '/api/incidentes/' + buraco.id, {
+        status: 'Em andamento',
+        history: [{ id: 'h1', type: 'status', text: 'Status alterado', by: 'operador', at: new Date().toISOString() }]
+      }, tokenOperador);
+      ok(propria.status === 200 && propria.corpo.incidente.status === 'Em andamento', 'altera o status da propria categoria');
+      ok(propria.corpo.incidente.history.length === 1, 'o historico enviado e guardado');
+
+      const removerOutra = await pedir('DELETE', '/api/incidentes/' + poste.id, null, tokenOperador);
+      ok(removerOutra.status === 403, 'nao remove ocorrencia de outra categoria');
+
+      const limparTudo = await pedir('DELETE', '/api/incidentes', null, tokenOperador);
+      ok(limparTudo.status === 403, 'so admin do sistema limpa tudo');
+
+      const depois = await pedir('GET', '/api/incidentes', null, token);
+      ok(depois.corpo.incidentes.length === 2, 'nada foi apagado pelo admin de categoria');
+    }
+
+    console.log('\nAlteracoes so tocam os campos permitidos');
+    {
+      const r = await pedir('PUT', '/api/incidentes/' + poste.id, {
+        latitude: '-23.4', longitude: '-46.7', name: 'Hacker', createdAt: '1999-01-01', photoDataUrl: 'data:image/png;base64,xx'
+      }, token);
+      ok(r.status === 200 && r.corpo.incidente.latitude === '-23.4', 'coordenadas geocodificadas sao gravadas');
+      ok(r.corpo.incidente.name === '' && r.corpo.incidente.createdAt === poste.createdAt && r.corpo.incidente.photoDataUrl === '', 'nome, data de abertura e foto nao mudam pela edicao');
+
+      const inexistente = await pedir('PUT', '/api/incidentes/nao-existe', { status: 'x' }, token);
+      ok(inexistente.status === 404, 'id inexistente responde 404');
+
+      const trabalho = await pedir('PUT', '/api/incidentes/' + poste.id, {
+        workUpdate: 'Equipe enviada', workUpdatedBy: 'admin', workUpdatedAt: new Date().toISOString()
+      }, token);
+      ok(trabalho.status === 200 && trabalho.corpo.incidente.workUpdate === 'Equipe enviada', 'atualizacao de trabalho gravada');
+    }
+
+    console.log('\nRemocao e limpeza');
+    {
+      const remover = await pedir('DELETE', '/api/incidentes/' + poste.id, null, token);
+      ok(remover.status === 200, 'admin do sistema remove uma ocorrencia');
+      const lista = await pedir('GET', '/api/incidentes', null, token);
+      ok(lista.corpo.incidentes.length === 1, 'sobrou 1');
+
+      const limpar = await pedir('DELETE', '/api/incidentes', null, token);
+      ok(limpar.status === 200 && limpar.corpo.removidas === 1, 'limpar tudo remove o restante');
+      const vazia = await pedir('GET', '/api/incidentes', null, token);
+      ok(vazia.corpo.incidentes.length === 0, 'lista vazia depois da limpeza');
+    }
+  } finally {
+    restaurar();
   }
 
   console.log(falhas === 0 ? '\nTodos os testes passaram.\n' : '\n' + falhas + ' teste(s) falharam.\n');

@@ -114,9 +114,23 @@ versão nova está mesmo no ar.
 ## Funcionalidades
 
 - front-end estático: `index.html`, `login.html`, `preview.html`, `styles.css`, `script.js`, `preview.js`
-- backend Node.js: `server.js`
+- backend Node.js: `server.js` (autenticação em `auth.js`, ocorrências em `incidentes.js`)
 - classificação por IA: `/api/classify` e `/api/classify-image`
 - notificações ao cidadão: `/api/notify-user`
+- ocorrências: `POST /api/incidentes` (abertura pública), `GET`/`PUT`/`DELETE /api/incidentes[/:id]` (painel, com sessão)
+
+## Dados
+
+Tudo o que o sistema grava fica em `dados/` (fora do git): `usuarios.json`,
+`configuracao.json` (categorias e prioridades) e `incidentes.json` (ocorrências,
+com a foto reduzida em base64). Faça backup dessa pasta no servidor.
+
+O administrador por categoria só recebe do servidor as ocorrências das suas
+categorias, e o servidor recusa alterações fora delas.
+
+Ocorrências abertas por versões anteriores ficaram no navegador de quem as
+registrou. Para enviá-las ao servidor, abra o site naquele navegador e rode no
+console: `smartgovIncidentes.migrarLocaisParaServidor()`.
 
 ## Regras de notificação
 

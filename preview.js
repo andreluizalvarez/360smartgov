@@ -1,4 +1,3 @@
-const STORAGE_KEY = 'smartgov360-incidents-v1';
 const PREVIEW_KEY = 'smartgov360-preview-incident';
 const previewTitle = document.getElementById('preview-title');
 const previewImage = document.getElementById('preview-image');
@@ -16,50 +15,19 @@ const editSend = document.getElementById('edit-send');
 const cancelSend = document.getElementById('cancel-send');
 const previewMessage = document.getElementById('preview-message');
 
-function getIncidents() {
-  const saved = localStorage.getItem(STORAGE_KEY);
-  if (!saved) {
-    return [];
-  }
-
-  try {
-    return JSON.parse(saved);
-  } catch (error) {
-    return [];
-  }
-}
-
-function saveIncidents(incidents) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(incidents));
-}
-
-function erroDeEspaco(error) {
-  return Boolean(
-    error &&
-      (error.name === 'QuotaExceededError' ||
-        error.name === 'NS_ERROR_DOM_QUOTA_REACHED' ||
-        error.code === 22 ||
-        error.code === 1014)
-  );
-}
-
-// Ultimo recurso quando o armazenamento esta cheio: encolhe a foto desta
-// ocorrencia e tenta gravar de novo, em vez de perder o registro.
-function encolherFotoDataUrl(dataUrl, ladoMaximo = 800, qualidade = 0.7) {
-  return new Promise((resolve) => {
-    if (!dataUrl) return resolve('');
-    const img = new Image();
-    img.onload = () => {
-      const escala = Math.min(1, ladoMaximo / Math.max(img.width, img.height));
-      const canvas = document.createElement('canvas');
-      canvas.width = Math.round(img.width * escala);
-      canvas.height = Math.round(img.height * escala);
-      canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
-      resolve(canvas.toDataURL('image/jpeg', qualidade));
-    };
-    img.onerror = () => resolve('');
-    img.src = dataUrl;
+// A ocorrencia e gravada no servidor: o administrador a enxerga de qualquer
+// aparelho, e o limite de armazenamento do navegador deixa de importar.
+async function gravarNoServidor(incident) {
+  const resposta = await fetch('/api/incidentes', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(incident)
   });
+  const corpo = await resposta.json().catch(() => ({}));
+  if (!resposta.ok) {
+    throw new Error(corpo.error || 'Não foi possível gravar a ocorrência.');
+  }
+  return corpo.incidente;
 }
 
 function formatPreviewAddress(data) {
@@ -121,19 +89,6 @@ function loadPreviewData() {
     }
   }
 
-  // Fallback: se não existe sessionStorage (por exemplo em testes), tente pegar o primeiro incidente do localStorage
-  try {
-    const all = localStorage.getItem(STORAGE_KEY);
-    if (all) {
-      const parsed = JSON.parse(all);
-      if (Array.isArray(parsed) && parsed.length) {
-        console.debug('Using fallback incident from localStorage for preview');
-        return parsed[0];
-      }
-    }
-  } catch (error) {
-    console.warn('Erro ao tentar fallback para localStorage:', error);
-  }
 
   // Nenhum dado disponível: retornar ao formulário
   if (previewMessage) previewMessage.textContent = 'Nenhuma pré-visualização encontrada. Você será redirecionado.';
@@ -201,34 +156,16 @@ async function confirmPreview() {
   const updatedData = collectPreviewData();
   if (!updatedData) return;
 
-  const incidents = getIncidents();
-  incidents.unshift(updatedData);
-
+  let gravada;
   try {
-    saveIncidents(incidents);
+    gravada = await gravarNoServidor(updatedData);
   } catch (error) {
-    if (!erroDeEspaco(error)) {
-      console.error('Erro ao gravar a ocorrência:', error);
-      showPreviewMessage('Não foi possível gravar a ocorrência. Tente novamente.', true);
-      return;
-    }
-
-    console.warn('[incidentes] Sem espaco: tentando gravar com a foto menor.');
-    const menor = { ...updatedData, photoDataUrl: await encolherFotoDataUrl(updatedData.photoDataUrl) };
-    incidents[0] = menor;
-    try {
-      saveIncidents(incidents);
-    } catch (segundoErro) {
-      console.error('[incidentes] Sem espaco mesmo com a foto menor:', segundoErro);
-      showPreviewMessage(
-        'O armazenamento do navegador está cheio. Não foi possível gravar a ocorrência.',
-        true
-      );
-      return;
-    }
+    console.error('Erro ao gravar a ocorrência:', error);
+    showPreviewMessage(error.message || 'Não foi possível gravar a ocorrência. Tente novamente.', true);
+    return;
   }
 
-  await notifyIncidentOpened(updatedData);
+  await notifyIncidentOpened(gravada || updatedData);
   sessionStorage.removeItem(PREVIEW_KEY);
   window.location.href = 'index.html';
 }

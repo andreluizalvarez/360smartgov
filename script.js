@@ -122,62 +122,58 @@ function onGoogleMapsLoaded() {
   }
 }
 
+// As ocorrencias vivem no servidor. O cliente guarda so uma copia em memoria,
+// carregada ao abrir o painel; toda alteracao vai pela API e a copia e
+// atualizada com a resposta.
+let incidentesCache = [];
+
 function getIncidents() {
-  const saved = localStorage.getItem(STORAGE_KEY);
-  if (!saved) {
-    const initial = [
-      {
-        id: crypto.randomUUID(),
-        name: 'Maria Souza',
-        email: 'maria@email.com',
-        title: 'Lâmpada pública apagada',
-        category: 'Iluminação pública',
-        priority: 'Alta',
-        description: 'Poste na Avenida Central com duas lâmpadas sem funcionamento.',
-        address: 'Avenida Central, 1000',
-        phone: '(11) 98888-7777',
-        latitude: -23.55052,
-        longitude: -46.633308,
-        workUpdate: '',
-        workUpdatedBy: '',
-        workUpdatedAt: '',
-        history: [],
-        status: 'Em análise',
-        createdAt: new Date().toISOString()
-      },
-      {
-        id: crypto.randomUUID(),
-        name: 'João Pereira',
-        email: 'joao@email.com',
-        title: 'Buraco na calçada',
-        category: 'Buraco',
-        priority: 'Urgente',
-        description: 'Buraco na frente da escola municipal com risco de acidente.',
-        address: 'Rua das Flores, 520',
-        phone: '(11) 97777-6666',
-        latitude: -23.551674,
-        longitude: -46.634467,
-        workUpdate: '',
-        workUpdatedBy: '',
-        workUpdatedAt: '',
-        history: [],
-        status: 'Em andamento',
-        createdAt: new Date().toISOString()
-      }
-    ];
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(initial));
-    return initial;
-  }
+  return incidentesCache;
+}
 
+function definirIncidentes(lista) {
+  incidentesCache = (Array.isArray(lista) ? lista : []).map(normalizeIncident).filter(Boolean);
+  return incidentesCache;
+}
+
+function substituirIncidenteNoCache(incidente) {
+  const normalizado = normalizeIncident(incidente);
+  if (!normalizado) return;
+  const indice = incidentesCache.findIndex((item) => item.id === normalizado.id);
+  if (indice === -1) incidentesCache.unshift(normalizado);
+  else incidentesCache[indice] = normalizado;
+}
+
+async function carregarIncidentesDoServidor() {
   try {
-    const parsed = JSON.parse(saved);
-    if (!Array.isArray(parsed)) return [];
-
-    const normalized = parsed.map(normalizeIncident).filter(Boolean);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(normalized));
-    return normalized;
+    const resposta = await apiAutenticada('/api/incidentes');
+    if (!resposta.ok) return false;
+    const corpo = await resposta.json().catch(() => ({}));
+    if (!Array.isArray(corpo.incidentes)) return false;
+    definirIncidentes(corpo.incidentes);
+    return true;
   } catch (error) {
-    return [];
+    console.warn('[incidentes] Nao foi possivel carregar as ocorrencias:', error);
+    return false;
+  }
+}
+
+// Envia so os campos alterados; o servidor confere a permissao por categoria.
+async function atualizarIncidenteNoServidor(id, campos) {
+  try {
+    const resposta = await apiAutenticada(`/api/incidentes/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      body: JSON.stringify(campos)
+    });
+    const corpo = await resposta.json().catch(() => ({}));
+    if (!resposta.ok) {
+      return { ok: false, erro: corpo.error || 'Não foi possível salvar a alteração.' };
+    }
+    substituirIncidenteNoCache(corpo.incidente);
+    return { ok: true, incidente: corpo.incidente };
+  } catch (error) {
+    console.error('[incidentes] Falha ao atualizar:', error);
+    return { ok: false, erro: 'Não foi possível falar com o servidor.' };
   }
 }
 
@@ -654,7 +650,7 @@ function cancelEditUser() {
   if (cancelBtn) cancelBtn.style.display = 'none';
 }
 
-function showAdminDashboard(user) {
+async function showAdminDashboard(user) {
   currentAdminUser = user;
   persistAdminSession(user);
 
@@ -664,6 +660,7 @@ function showAdminDashboard(user) {
   }
 
   updateTabVisibilityByRole();
+  await carregarIncidentesDoServidor();
   refreshDashboard();
   if (isSystemAdmin()) {
     renderAdminConfig();
@@ -675,6 +672,7 @@ function showAdminDashboard(user) {
 function hideAdminDashboard() {
   currentAdminUser = null;
   persistAdminSession(null);
+  definirIncidentes([]);
 
   if (adminLogin && adminDashboard) {
     adminLogin.classList.remove('hidden');
@@ -684,39 +682,9 @@ function hideAdminDashboard() {
 
 // `permitirVazio` so e usado pela acao de limpar tudo do painel. Qualquer outra
 // gravacao que zeraria a base e recusada: e sempre sintoma de bug, nunca intencao.
-function saveIncidents(incidents, { permitirVazio = false } = {}) {
-  const normalized = Array.isArray(incidents)
-    ? incidents.map(normalizeIncident).filter(Boolean)
-    : [];
-
-  if (!normalized.length && !permitirVazio) {
-    const existentes = lerIncidentesSalvos();
-    if (existentes.length) {
-      console.error(
-        '[incidentes] Gravacao vazia bloqueada: havia',
-        existentes.length,
-        'ocorrencia(s) salvas. Nada foi apagado.'
-      );
-      return false;
-    }
-  }
-
-  // Guarda a versao anterior antes de reduzir a base, para permitir restauracao.
-  const anteriores = lerIncidentesSalvos();
-  if (anteriores.length > normalized.length) {
-    try {
-      localStorage.setItem(STORAGE_BACKUP_KEY, JSON.stringify(anteriores));
-    } catch (error) {
-      console.warn('[incidentes] Nao foi possivel guardar o backup:', error);
-    }
-  }
-
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(normalized));
-  return true;
-}
-
-// Le o que esta gravado sem recorrer ao seed inicial de getIncidents().
-function lerIncidentesSalvos() {
+// Ocorrencias que ficaram gravadas no navegador pela versao anterior, quando
+// ainda nao existia armazenamento no servidor.
+function lerIncidentesLocaisAntigos() {
   try {
     const bruto = localStorage.getItem(STORAGE_KEY);
     if (!bruto) return [];
@@ -727,46 +695,40 @@ function lerIncidentesSalvos() {
   }
 }
 
-// Ferramentas de recuperacao, para uso no console do navegador.
+// Ferramentas para uso no console do navegador.
 window.smartgovIncidentes = {
-  // Quantas ocorrencias estao salvas agora.
-  listar: () => lerIncidentesSalvos(),
+  // Copia em memoria do que o servidor devolveu para este usuario.
+  listar: () => getIncidents(),
 
-  // Copia guardada automaticamente antes da ultima reducao da base.
-  verBackup() {
-    try {
-      const bruto = localStorage.getItem(STORAGE_BACKUP_KEY);
-      return bruto ? JSON.parse(bruto) : [];
-    } catch (error) {
-      return [];
-    }
-  },
-
-  // Devolve o backup para a base ativa.
-  restaurarBackup() {
-    const backup = this.verBackup();
-    if (!backup.length) {
-      console.warn('Nao ha backup guardado.');
-      return false;
-    }
-    saveIncidents(backup);
-    console.log('Restauradas', backup.length, 'ocorrencia(s). Recarregue a pagina.');
-    return true;
-  },
+  // O que a versao antiga deixou gravado neste navegador.
+  listarLocaisAntigos: () => lerIncidentesLocaisAntigos(),
 
   // JSON para guardar fora do navegador.
-  exportar: () => JSON.stringify(lerIncidentesSalvos(), null, 2),
+  exportar: () => JSON.stringify(getIncidents(), null, 2),
 
-  // Repoe a partir de um JSON exportado antes.
-  importar(json) {
-    const lista = typeof json === 'string' ? JSON.parse(json) : json;
-    if (!Array.isArray(lista)) {
-      console.error('Esperado um array de ocorrencias.');
-      return false;
+  // Envia ao servidor as ocorrencias antigas deste navegador (uma unica vez).
+  async migrarLocaisParaServidor() {
+    const locais = lerIncidentesLocaisAntigos();
+    if (!locais.length) {
+      console.warn('Nao ha ocorrencias antigas neste navegador.');
+      return 0;
     }
-    saveIncidents(lista);
-    console.log('Importadas', lista.length, 'ocorrencia(s). Recarregue a pagina.');
-    return true;
+    let enviadas = 0;
+    for (const item of locais) {
+      const resposta = await fetch('/api/incidentes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(item)
+      });
+      if (resposta.ok) enviadas += 1;
+      else console.warn('Falhou:', item.id, await resposta.text());
+    }
+    if (enviadas === locais.length) {
+      localStorage.removeItem(STORAGE_KEY);
+      localStorage.removeItem(STORAGE_BACKUP_KEY);
+    }
+    console.log('Migradas', enviadas, 'de', locais.length, 'ocorrencia(s). Recarregue a pagina.');
+    return enviadas;
   }
 };
 
@@ -1070,16 +1032,19 @@ async function resolveIncidentCoordinates(incident) {
 
 async function ensureIncidentCoordinates(incidents) {
   if (!googleMapsLoaded) return incidents;
-  const updated = await Promise.all(incidents.map(resolveIncidentCoordinates));
 
-  // `incidents` pode ser um subconjunto filtrado por permissao (um admin de
-  // categoria so enxerga a sua). Gravar esse subconjunto direto apagaria as
-  // ocorrencias das demais categorias, entao as coordenadas sao mescladas
-  // sobre a base completa.
-  const porId = new Map(updated.filter((item) => item && item.id).map((item) => [item.id, item]));
-  const base = getIncidents();
-  const mesclado = base.map((item) => porId.get(item.id) || item);
-  saveIncidents(mesclado);
+  const updated = [];
+  for (const incident of incidents) {
+    const tinhaCoordenadas = Number.isFinite(Number(incident.latitude)) && Number.isFinite(Number(incident.longitude));
+    const resolvido = await resolveIncidentCoordinates({ ...incident });
+    updated.push(resolvido);
+
+    // Coordenada recem-geocodificada: persiste so esse campo, nesta ocorrencia.
+    // Nunca se grava a lista inteira (que pode ser um subconjunto filtrado).
+    if (!tinhaCoordenadas && resolvido.latitude && resolvido.longitude) {
+      atualizarIncidenteNoServidor(incident.id, { latitude: resolvido.latitude, longitude: resolvido.longitude });
+    }
+  }
 
   return updated;
 }
@@ -1311,38 +1276,35 @@ function escapeHtml(value) {
     .replace(/'/g, '&#39;');
 }
 
-function saveIncidentWorkUpdate(id, workUpdate) {
-  const visibleIds = new Set(getVisibleIncidents(getIncidents()).map((item) => item.id));
-  if (!visibleIds.has(id)) {
+async function saveIncidentWorkUpdate(id, workUpdate) {
+  const item = getVisibleIncidents(getIncidents()).find((it) => it.id === id);
+  if (!item) {
     showMessage(adminMessage, 'Você não tem permissão para atualizar esta ocorrência.', true);
     return;
   }
 
-  const incidents = getIncidents();
   const now = new Date().toISOString();
   const noteText = workUpdate || 'Atualização removida pelo administrador.';
-  const updatedIncidents = incidents.map((item) => {
-    if (item.id !== id) return item;
-
-    return {
-      ...item,
-      workUpdate: workUpdate || '',
-      workUpdatedBy: currentAdminUser?.username || '',
-      workUpdatedAt: now,
-      history: [
-        ...(Array.isArray(item.history) ? item.history : []),
-        {
-          id: crypto.randomUUID(),
-          type: 'work',
-          text: noteText,
-          by: currentAdminUser?.username || '',
-          at: now
-        }
-      ]
-    };
+  const resultado = await atualizarIncidenteNoServidor(id, {
+    workUpdate: workUpdate || '',
+    workUpdatedBy: currentAdminUser?.username || '',
+    workUpdatedAt: now,
+    history: [
+      ...(Array.isArray(item.history) ? item.history : []),
+      {
+        id: crypto.randomUUID(),
+        type: 'work',
+        text: noteText,
+        by: currentAdminUser?.username || '',
+        at: now
+      }
+    ]
   });
 
-  saveIncidents(updatedIncidents);
+  if (!resultado.ok) {
+    showMessage(adminMessage, resultado.erro, true);
+    return;
+  }
   refreshDashboard();
   showMessage(adminMessage, 'Atualização da ocorrência salva com sucesso.', false);
 }
@@ -2079,7 +2041,7 @@ if (loginForm) {
       setToken(dados.token);
       const user = dados.usuario;
       await sincronizarUsuariosDoServidor();
-      showAdminDashboard(user);
+      await showAdminDashboard(user);
 
       const perfil = isSystemAdmin(user) ? 'Administrador do sistema' : 'Administrador por categoria';
       const aviso = user.senhaPadrao
@@ -2151,7 +2113,18 @@ if (clearIncidentsBtn) {
     if (!ensureSystemAdminAction()) return;
     const confirmed = window.confirm('Tem certeza que deseja limpar todas as ocorrências cadastradas?');
     if (!confirmed) return;
-    saveIncidents([], { permitirVazio: true });
+    try {
+      const resposta = await apiAutenticada('/api/incidentes', { method: 'DELETE' });
+      const corpo = await resposta.json().catch(() => ({}));
+      if (!resposta.ok) {
+        showMessage(adminMessage, corpo.error || 'Não foi possível limpar as ocorrências.', true);
+        return;
+      }
+    } catch (error) {
+      showMessage(adminMessage, 'Não foi possível falar com o servidor.', true);
+      return;
+    }
+    definirIncidentes([]);
     await refreshDashboard();
     showMessage(adminMessage, 'Todas as ocorrências foram removidas.', false);
   });
@@ -2164,36 +2137,31 @@ if (incidentList) {
     const select = event.target.closest('.status-select');
     if (!select) return;
 
-    const visibleIds = new Set(getVisibleIncidents(getIncidents()).map((item) => item.id));
-    if (!visibleIds.has(select.dataset.id)) return;
+    const item = getVisibleIncidents(getIncidents()).find((it) => it.id === select.dataset.id);
+    if (!item || item.status === select.value) return;
 
-    const incidents = getIncidents();
     const now = new Date().toISOString();
-    let changedIncident = null;
-    let previousStatus = '';
-    const updated = incidents.map((item) => {
-      if (item.id !== select.dataset.id) return item;
-      if (item.status === select.value) return item;
-
-      previousStatus = item.status;
-      changedIncident = {
-        ...item,
-        status: select.value,
-        history: [
-          ...(Array.isArray(item.history) ? item.history : []),
-          {
-            id: crypto.randomUUID(),
-            type: 'status',
-            text: `Status alterado de ${item.status} para ${select.value}`,
-            by: currentAdminUser?.username || '',
-            at: now
-          }
-        ]
-      };
-
-      return changedIncident;
+    const previousStatus = item.status;
+    const resultado = await atualizarIncidenteNoServidor(item.id, {
+      status: select.value,
+      history: [
+        ...(Array.isArray(item.history) ? item.history : []),
+        {
+          id: crypto.randomUUID(),
+          type: 'status',
+          text: `Status alterado de ${item.status} para ${select.value}`,
+          by: currentAdminUser?.username || '',
+          at: now
+        }
+      ]
     });
-    saveIncidents(updated);
+
+    if (!resultado.ok) {
+      showMessage(adminMessage, resultado.erro, true);
+      refreshDashboard();
+      return;
+    }
+    const changedIncident = normalizeIncident(resultado.incidente);
     refreshDashboard();
 
     if (changedIncident) {
@@ -2276,6 +2244,9 @@ function switchTab(tab) {
   if (tab === 'occurrences') {
     tabOccurrences.classList.add('active');
     panelOccurrences.classList.remove('hidden');
+    carregarIncidentesDoServidor().then((ok) => {
+      if (ok) refreshDashboard();
+    });
     if (adminMap) {
       setTimeout(() => {
         if (window.google?.maps) {
@@ -2747,7 +2718,7 @@ async function restaurarSessaoDoServidor() {
     if (!corpo.usuario) return false;
 
     await sincronizarUsuariosDoServidor();
-    showAdminDashboard(corpo.usuario);
+    await showAdminDashboard(corpo.usuario);
     showMessage(loginMessage, `Sessão restaurada para ${corpo.usuario.username}.`, false);
     return true;
   } catch (error) {

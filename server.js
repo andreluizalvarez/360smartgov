@@ -2,6 +2,7 @@ const express = require('express');
 const path = require('path');
 const fs = require('fs');
 const { criarAuth } = require('./auth');
+const { criarIncidentes } = require('./incidentes');
 require('dotenv').config();
 const multer = require('multer');
 const nodemailer = require('nodemailer');
@@ -75,6 +76,7 @@ const ARQUIVO_CONFIG = path.join(DIRETORIO_DADOS, 'configuracao.json');
 
 const auth = criarAuth({ diretorioDados: DIRETORIO_DADOS });
 auth.garantirAdminPadrao();
+const incidentes = criarIncidentes({ diretorioDados: DIRETORIO_DADOS, papelAdminSistema: auth.PAPEL_ADMIN_SISTEMA });
 
 function lerConfiguracao() {
   try {
@@ -154,7 +156,8 @@ function esquemaDeClassificacao(categorias, prioridades) {
 }
 
 app.use(express.static(path.join(__dirname)));
-app.use(express.json());
+// A ocorrencia chega com a foto em base64 no corpo: o limite padrao de 100 kb nao basta.
+app.use(express.json({ limit: '4mb' }));
 
 function parseJsonFromText(text) {
   const jsonMatch = text.match(/\{[\s\S]*\}/);
@@ -468,6 +471,42 @@ app.delete('/api/auth/usuarios/:id', auth.exigirAdminSistema, (req, res) => {
     return res.status(resultado.status).json({ error: resultado.erro });
   }
   return res.json(resultado);
+});
+
+// ------------------------------------------------------------ ocorrencias
+//
+// Abertura e publica (o cidadao nao tem login). Leitura e alteracao exigem
+// sessao, e o admin de categoria so enxerga e altera o que lhe cabe.
+app.post('/api/incidentes', (req, res) => {
+  const resultado = incidentes.criar(req.body || {});
+  if (resultado.erro) {
+    return res.status(resultado.status).json({ error: resultado.erro });
+  }
+  return res.status(201).json(resultado);
+});
+
+app.get('/api/incidentes', auth.exigirAutenticacao, (req, res) => {
+  return res.json({ incidentes: incidentes.listar(req.usuario) });
+});
+
+app.put('/api/incidentes/:id', auth.exigirAutenticacao, (req, res) => {
+  const resultado = incidentes.atualizar(req.params.id, req.body || {}, req.usuario);
+  if (resultado.erro) {
+    return res.status(resultado.status).json({ error: resultado.erro });
+  }
+  return res.json(resultado);
+});
+
+app.delete('/api/incidentes/:id', auth.exigirAutenticacao, (req, res) => {
+  const resultado = incidentes.remover(req.params.id, req.usuario);
+  if (resultado.erro) {
+    return res.status(resultado.status).json({ error: resultado.erro });
+  }
+  return res.json(resultado);
+});
+
+app.delete('/api/incidentes', auth.exigirAdminSistema, (req, res) => {
+  return res.json(incidentes.limpar());
 });
 
 // Lista em vigor, consultada por qualquer navegador ao abrir o site.

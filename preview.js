@@ -132,26 +132,6 @@ function collectPreviewData() {
   };
 }
 
-async function notifyIncidentOpened(incident) {
-  try {
-    const response = await fetch('/api/notify-user', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        eventType: 'incident_created',
-        incident
-      })
-    });
-
-    return response.ok;
-  } catch (error) {
-    console.warn('Falha ao notificar abertura da ocorrência:', error);
-    return false;
-  }
-}
-
 async function confirmPreview() {
   const updatedData = collectPreviewData();
   if (!updatedData) return;
@@ -165,7 +145,8 @@ async function confirmPreview() {
     return;
   }
 
-  await notifyIncidentOpened(gravada || updatedData);
+  // A notificacao ao cidadao e disparada pelo servidor ao gravar; a tela
+  // nao precisa esperar por ela.
   sessionStorage.removeItem(PREVIEW_KEY);
   window.location.href = 'index.html';
 }

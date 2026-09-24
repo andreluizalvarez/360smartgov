@@ -1175,6 +1175,8 @@ async function notifyIncidentStatusChange(incident, previousStatus, newStatus) {
   try {
     const response = await fetch('/api/notify-user', {
       method: 'POST',
+      // O servidor ja limita cada envio; este e o teto do lado do painel.
+      signal: AbortSignal.timeout(25000),
       headers: {
         'Content-Type': 'application/json'
       },

@@ -304,6 +304,50 @@ function buildNotificationText(eventType, incident, actor, previousStatus, newSt
 
 let gmailTransporter = null;
 
+// Nenhum envio pode segurar uma requisicao por mais que isto: o nginx corta em
+// 60 s, e o cidadao nao deve esperar pela entrega do e-mail para ver a
+// ocorrencia registrada.
+const TEMPO_LIMITE_ENVIO_MS = 15000;
+
+function comTempoLimite(promessa, ms, motivo) {
+  let temporizador;
+  const limite = new Promise((resolve) => {
+    temporizador = setTimeout(() => resolve({ sent: false, reason: motivo }), ms);
+  });
+  return Promise.race([promessa, limite]).finally(() => clearTimeout(temporizador));
+}
+
+// Dispara e-mail e WhatsApp em paralelo, cada um com o seu limite de tempo.
+// Nunca rejeita: devolve o resultado de cada canal.
+async function enviarNotificacao(eventType, incident, actor, previousStatus, newStatus) {
+  const recipientEmail = incident?.email || '';
+  const recipientPhone = incident?.phone || '';
+  if (!incident || (!recipientEmail && !recipientPhone)) {
+    return { ok: false, email: { sent: false, reason: 'Sem contato.' }, whatsapp: { sent: false, reason: 'Sem contato.' } };
+  }
+
+  const composed = buildNotificationText(eventType, incident, actor, previousStatus, newStatus);
+
+  const [emailResult, whatsappResult] = await Promise.all([
+    comTempoLimite(
+      sendEmailNotification(recipientEmail, composed.subject, composed.emailText)
+        .catch((error) => ({ sent: false, reason: error.message })),
+      TEMPO_LIMITE_ENVIO_MS, 'Tempo esgotado ao enviar o e-mail.'
+    ),
+    comTempoLimite(
+      sendWhatsAppNotification(recipientPhone, composed.whatsappText)
+        .catch((error) => ({ sent: false, reason: error.message })),
+      TEMPO_LIMITE_ENVIO_MS, 'Tempo esgotado ao enviar o WhatsApp.'
+    )
+  ]);
+
+  const ok = Boolean(emailResult.sent || whatsappResult.sent);
+  if (!ok) {
+    console.warn('[notificacao]', eventType, 'nao entregue:', emailResult.reason, '|', whatsappResult.reason);
+  }
+  return { ok, email: emailResult, whatsapp: whatsappResult };
+}
+
 function getGmailTransporter() {
   if (gmailTransporter) {
     return gmailTransporter;
@@ -313,12 +357,18 @@ function getGmailTransporter() {
     return null;
   }
 
+  // Sem estes limites o nodemailer espera ate 2 minutos por uma conexao SMTP
+  // que nunca abre (provedores de nuvem costumam bloquear a porta de saida),
+  // e a requisicao fica pendurada ate o nginx cortar com 504.
   gmailTransporter = nodemailer.createTransport({
     service: 'gmail',
     auth: {
       user: GMAIL_USER,
       pass: GMAIL_APP_PASSWORD
-    }
+    },
+    connectionTimeout: 8000,
+    greetingTimeout: 8000,
+    socketTimeout: 15000
   });
 
   return gmailTransporter;
@@ -351,6 +401,7 @@ async function sendEmailViaResend(toEmail, subject, text) {
 
   const response = await fetchFunc('https://api.resend.com/emails', {
     method: 'POST',
+    signal: AbortSignal.timeout(TEMPO_LIMITE_ENVIO_MS),
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${RESEND_API_KEY}`
@@ -407,6 +458,7 @@ async function sendWhatsAppNotification(toPhone, text) {
   const basicToken = Buffer.from(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`).toString('base64');
   const response = await fetchFunc(`https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`, {
     method: 'POST',
+    signal: AbortSignal.timeout(TEMPO_LIMITE_ENVIO_MS),
     headers: {
       Authorization: `Basic ${basicToken}`,
       'Content-Type': 'application/x-www-form-urlencoded'
@@ -482,6 +534,13 @@ app.post('/api/incidentes', (req, res) => {
   if (resultado.erro) {
     return res.status(resultado.status).json({ error: resultado.erro });
   }
+
+  // A notificacao ao cidadao vai em segundo plano: a resposta nao espera o
+  // e-mail, que pode demorar ou falhar sem que a ocorrencia deixe de existir.
+  enviarNotificacao('incident_created', resultado.incidente).catch((error) => {
+    console.warn('[notificacao] falha inesperada:', error);
+  });
+
   return res.status(201).json(resultado);
 });
 
@@ -720,19 +779,8 @@ app.post('/api/notify-user', async (req, res) => {
     });
   }
 
-  const composed = buildNotificationText(eventType, incident, actor, previousStatus, newStatus);
-
-  const [emailResult, whatsappResult] = await Promise.all([
-    sendEmailNotification(recipientEmail, composed.subject, composed.emailText).catch((error) => ({ sent: false, reason: error.message })),
-    sendWhatsAppNotification(recipientPhone, composed.whatsappText).catch((error) => ({ sent: false, reason: error.message }))
-  ]);
-
-  const success = emailResult.sent || whatsappResult.sent;
-  return res.status(success ? 200 : 207).json({
-    ok: success,
-    email: emailResult,
-    whatsapp: whatsappResult
-  });
+  const resultado = await enviarNotificacao(eventType, incident, actor, previousStatus, newStatus);
+  return res.status(resultado.ok ? 200 : 207).json(resultado);
 });
 
 app.listen(PORT, () => {

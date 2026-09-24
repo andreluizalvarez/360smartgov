@@ -30,7 +30,8 @@ function carregarFuncoes() {
   const trecho = codigo.slice(inicio, fim)
     .replace(/^app\.use\(.*$/gm, '')
     .replace(/^const auth = criarAuth.*$/gm, '')
-    .replace(/^auth\.garantirAdminPadrao\(\);$/gm, '');
+    .replace(/^auth\.garantirAdminPadrao\(\);$/gm, '')
+    .replace(/^const incidentes = criarIncidentes.*$/gm, '');
 
   // O recorte usa path/fs para localizar a configuracao persistida; aqui ela
   // nao existe, e as funcoes caem nos padroes — que e o que se quer testar.

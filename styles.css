@@ -806,6 +806,53 @@ select.status-select {
   object-fit: contain;
 }
 
+/* Endereço manual: logradouro e número lado a lado, cidade e UF lado a lado */
+.address-fields {
+  grid-template-columns: minmax(0, 3fr) minmax(0, 1fr);
+  gap: 0.9rem;
+  padding: 1rem;
+  border: 1px solid rgba(46, 158, 98, 0.18);
+  border-radius: 14px;
+  background: #fbfdfa;
+}
+
+.address-fields .address-cep,
+.address-fields .address-neighborhood {
+  grid-column: 1 / -1;
+}
+
+.address-fields .address-number input[readonly] {
+  background: #eef2ee;
+  color: var(--muted);
+}
+
+.inline-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-weight: 500;
+  font-size: 0.9rem;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.inline-check input {
+  width: auto;
+  padding: 0;
+  accent-color: var(--accent-2);
+}
+
+.field input.campo-invalido {
+  border-color: var(--danger);
+  box-shadow: 0 0 0 3px rgba(200, 60, 60, 0.12);
+}
+
+@media (max-width: 560px) {
+  .address-fields {
+    grid-template-columns: 1fr;
+  }
+}
+
 [hidden] {
   display: none !important;
 }

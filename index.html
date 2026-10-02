@@ -84,32 +84,36 @@
               </div>
               <span id="geo-message" class="form-message" aria-live="polite"></span>
             </div>
-            <div id="address-fields" style="display:none;">
-              <div class="field">
+            <div id="address-fields" class="address-fields" style="display:none;">
+              <div class="field address-cep">
                 <label for="cep">CEP</label>
-                <input id="cep" name="cep" placeholder="00000-000" />
+                <input id="cep" name="cep" placeholder="00000-000" inputmode="numeric" autocomplete="postal-code" />
+                <div id="cep-message" class="form-message" role="status" aria-live="polite"></div>
               </div>
-              <div class="field">
+              <div class="field address-street">
                 <label for="street">Logradouro</label>
-                <input id="street" name="street" placeholder="Rua" />
+                <input id="street" name="street" placeholder="Rua, avenida, travessa..." autocomplete="address-line1" />
               </div>
-              <div class="field">
+              <div class="field address-number">
                 <label for="number">Número</label>
-                <input id="number" name="number" placeholder="Número" />
+                <input id="number" name="number" placeholder="Ex.: 123" inputmode="numeric" autocomplete="off" />
+                <label class="inline-check" for="no-number">
+                  <input type="checkbox" id="no-number" />
+                  Sem número
+                </label>
               </div>
-              <div class="field">
+              <div class="field address-neighborhood">
                 <label for="neighborhood">Bairro</label>
                 <input id="neighborhood" name="neighborhood" placeholder="Bairro" />
               </div>
-              <div class="field">
+              <div class="field address-city">
                 <label for="city">Cidade</label>
-                <input id="city" name="city" placeholder="Cidade" />
+                <input id="city" name="city" placeholder="Cidade" autocomplete="address-level2" />
               </div>
-              <div class="field">
+              <div class="field address-state">
                 <label for="state">Estado</label>
-                <input id="state" name="state" placeholder="UF" />
+                <input id="state" name="state" placeholder="UF" maxlength="2" autocomplete="address-level1" />
               </div>
-              <div id="cep-message" class="form-message" role="status" aria-live="polite"></div>
             </div>
             <input type="hidden" id="category" name="category" value="" />
             <input type="hidden" id="priority" name="priority" value="" />

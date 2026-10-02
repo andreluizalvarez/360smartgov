@@ -13,6 +13,7 @@ const cepMessage = document.getElementById('cep-message');
 const cepInput = document.getElementById('cep');
 const streetInput = document.getElementById('street');
 const numberInput = document.getElementById('number');
+const noNumberCheckbox = document.getElementById('no-number');
 const neighborhoodInput = document.getElementById('neighborhood');
 const cityInput = document.getElementById('city');
 const stateInput = document.getElementById('state');
@@ -1011,8 +1012,15 @@ function geocodeAddress(address) {
   });
 }
 
+// Coordenada vazia nao e coordenada: Number('') vale 0, e o marcador iria parar
+// no ponto 0,0 do mapa em vez de ser localizado pelo endereco.
+function temCoordenadas(incident) {
+  const valida = (valor) => valor !== '' && valor !== null && valor !== undefined && Number.isFinite(Number(valor));
+  return Boolean(incident) && valida(incident.latitude) && valida(incident.longitude);
+}
+
 async function resolveIncidentCoordinates(incident) {
-  if (Number.isFinite(Number(incident.latitude)) && Number.isFinite(Number(incident.longitude))) {
+  if (temCoordenadas(incident)) {
     return incident;
   }
 
@@ -1035,7 +1043,7 @@ async function ensureIncidentCoordinates(incidents) {
 
   const updated = [];
   for (const incident of incidents) {
-    const tinhaCoordenadas = Number.isFinite(Number(incident.latitude)) && Number.isFinite(Number(incident.longitude));
+    const tinhaCoordenadas = temCoordenadas(incident);
     const resolvido = await resolveIncidentCoordinates({ ...incident });
     updated.push(resolvido);
 
@@ -1083,7 +1091,7 @@ async function initMap(incidents) {
   }
 
   const readyIncidents = await ensureIncidentCoordinates(incidents);
-  const validPoints = readyIncidents.filter((incident) => Number.isFinite(Number(incident.latitude)) && Number.isFinite(Number(incident.longitude)));
+  const validPoints = readyIncidents.filter((incident) => temCoordenadas(incident));
 
   if (!validPoints.length) {
     mapElement.innerHTML = '<p style="padding:1rem; color: var(--muted);">Nenhuma ocorrência com endereço válido para exibir no mapa.</p>';
@@ -1890,6 +1898,16 @@ if (occurrenceForm) {
       }
     }
 
+    if (locationMode === 'manual') {
+      const faltando = validarEnderecoManual();
+      if (faltando) {
+        showMessage(formMessage, faltando.mensagem, true);
+        faltando.campo.focus();
+        faltando.campo.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        return;
+      }
+    }
+
     if (submitButton) submitButton.disabled = true;
     if (submitLoading) submitLoading.classList.remove('hidden');
     showMessage(formMessage, 'Classificando a ocorrência...', false);
@@ -1978,8 +1996,10 @@ if (occurrenceForm) {
         workUpdate: '',
         workUpdatedBy: '',
         workUpdatedAt: '',
-        latitude: sessionStorage.getItem('smartgov360-last-latitude') || '',
-        longitude: sessionStorage.getItem('smartgov360-last-longitude') || '',
+        // Endereco digitado nao herda as coordenadas de uma geolocalizacao
+        // anterior: o painel localiza o ponto pelo proprio endereco, com numero.
+        latitude: locationMode === 'manual' ? '' : sessionStorage.getItem('smartgov360-last-latitude') || '',
+        longitude: locationMode === 'manual' ? '' : sessionStorage.getItem('smartgov360-last-longitude') || '',
         status: 'Em análise',
         createdAt: new Date().toISOString()
       };
@@ -2339,7 +2359,12 @@ async function lookupCep(cep) {
     if (neighborhoodInput) neighborhoodInput.value = data.bairro || '';
     if (cityInput) cityInput.value = data.localidade || '';
     if (stateInput) stateInput.value = data.uf || '';
-    cepMessage.textContent = 'Endereço preenchido automaticamente.';
+    // O CEP nao traz o numero do imovel: o foco vai direto para ele.
+    const faltaNumero = numberInput && !numberInput.value.trim();
+    cepMessage.textContent = faltaNumero
+      ? 'Endereço preenchido automaticamente. Informe o número.'
+      : 'Endereço preenchido automaticamente.';
+    if (faltaNumero && manualRadio?.checked) numberInput.focus();
   } catch (error) {
     cepMessage.textContent = 'Erro ao buscar CEP. Tente novamente.';
   }
@@ -2354,9 +2379,52 @@ if (cepInput) {
   });
 }
 
+// "Sem numero" grava S/N no campo e o trava; desmarcar devolve o campo vazio.
+function definirSemNumero(semNumero) {
+  if (!numberInput) return;
+  if (noNumberCheckbox) noNumberCheckbox.checked = semNumero;
+  numberInput.readOnly = semNumero;
+  if (semNumero) {
+    numberInput.value = 'S/N';
+    numberInput.classList.remove('campo-invalido');
+  } else if (numberInput.value === 'S/N') {
+    numberInput.value = '';
+  }
+}
+
+if (noNumberCheckbox) {
+  noNumberCheckbox.addEventListener('change', () => {
+    definirSemNumero(noNumberCheckbox.checked);
+    if (!noNumberCheckbox.checked) numberInput?.focus();
+  });
+}
+
+// No modo manual, logradouro, numero e cidade sao obrigatorios. Devolve o
+// primeiro campo que falta (para receber o foco) ou null se estiver completo.
+function validarEnderecoManual() {
+  const obrigatorios = [
+    [streetInput, 'Informe o logradouro.'],
+    [numberInput, 'Informe o número do endereço ou marque "Sem número".'],
+    [cityInput, 'Informe a cidade.']
+  ];
+
+  let primeiro = null;
+  for (const [campo, mensagem] of obrigatorios) {
+    if (!campo) continue;
+    const vazio = !campo.value.trim();
+    campo.classList.toggle('campo-invalido', vazio);
+    if (vazio && !primeiro) primeiro = { campo, mensagem };
+  }
+  return primeiro;
+}
+
+[streetInput, numberInput, cityInput].forEach((campo) => {
+  if (campo) campo.addEventListener('input', () => campo.classList.remove('campo-invalido'));
+});
+
 function updateAddressMode() {
   if (manualRadio?.checked) {
-    if (addressFields) addressFields.style.display = 'block';
+    if (addressFields) addressFields.style.display = 'grid';
   } else {
     if (addressFields) addressFields.style.display = 'none';
   }
@@ -2642,6 +2710,7 @@ async function getGeolocationAddress() {
 
       if (cepInput) cepInput.value = result.cep;
       if (streetInput) streetInput.value = result.street;
+      definirSemNumero(false);
       if (numberInput) numberInput.value = result.number;
       if (neighborhoodInput) neighborhoodInput.value = result.neighborhood;
       if (cityInput) cityInput.value = result.city;

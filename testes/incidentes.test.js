@@ -179,6 +179,41 @@ async function esperarServidor() {
       ok(depois.corpo.incidentes.length === 2, 'nada foi apagado pelo admin de categoria');
     }
 
+    console.log('\nProdutividade por administrador de categoria');
+    {
+      const semToken = await pedir('GET', '/api/incidentes/produtividade');
+      ok(semToken.status === 401, 'produtividade sem token responde 401');
+      const comoOperador = await pedir('GET', '/api/incidentes/produtividade', null, tokenOperador);
+      ok(comoOperador.status === 403, 'admin de categoria nao acessa a produtividade');
+
+      const agora = new Date().toISOString();
+      const resolver = await pedir('PUT', '/api/incidentes/' + buraco.id, {
+        status: 'Resolvido',
+        history: [
+          { id: 'h1', type: 'status', text: 'Status alterado de Em análise para Em andamento', by: 'operador', at: agora },
+          { id: 'h2', type: 'work', text: 'Equipe no local', by: 'operador', at: agora },
+          { id: 'h3', type: 'status', text: 'Status alterado de Em andamento para Resolvido', by: 'operador', at: agora }
+        ]
+      }, tokenOperador);
+      ok(resolver.status === 200, 'operador resolve a ocorrencia com historico');
+
+      const prod = await pedir('GET', '/api/incidentes/produtividade?dias=30', null, token);
+      ok(prod.status === 200, 'admin do sistema consulta a produtividade');
+      const linha = prod.corpo.usuarios.find((u) => u.username === 'operador');
+      ok(Boolean(linha), 'o operador aparece na lista');
+      ok(linha.resolvidas === 1 && linha.mudancasStatus === 2 && linha.atualizacoes === 1 && linha.acoes === 3, 'conta resolvidas, mudancas de status e atualizacoes');
+      ok(linha.ocorrenciasTocadas === 1 && linha.naCategoria === 1 && linha.abertasNaCategoria === 0, 'conta ocorrencias tocadas e abertas na categoria');
+      ok(typeof linha.horasMediasResolucao === 'number' && linha.horasMediasResolucao >= 0, 'calcula o tempo medio de resolucao');
+      ok(prod.corpo.resumo.resolvidas === 1 && prod.corpo.resumo.ativos === 1, 'resumo agrega os usuarios');
+      ok(!prod.corpo.usuarios.some((u) => u.username === 'admin'), 'o admin do sistema nao entra na medicao');
+
+      const antigo = await pedir('GET', '/api/incidentes/produtividade?dias=0', null, token);
+      ok(antigo.corpo.usuarios.find((u) => u.username === 'operador').resolvidas === 1, 'dias=0 considera todo o historico');
+
+      // devolve a ocorrencia ao estado anterior para os testes seguintes
+      await pedir('PUT', '/api/incidentes/' + buraco.id, { status: 'Em andamento' }, token);
+    }
+
     console.log('\nAlteracoes so tocam os campos permitidos');
     {
       const r = await pedir('PUT', '/api/incidentes/' + poste.id, {

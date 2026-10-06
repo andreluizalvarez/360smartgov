@@ -67,6 +67,7 @@
               <button id="tab-priorities" class="tab-button" role="tab">Prioridades</button>
               <button id="tab-users" class="tab-button" role="tab">Usuários</button>
               <button id="tab-password" class="tab-button" role="tab">Minha senha</button>
+              <button id="tab-productivity" class="tab-button" role="tab">Produtividade</button>
               <button id="tab-notifications" class="tab-button" role="tab">Notificações</button>
             </div>
           </div>
@@ -211,6 +212,54 @@
               </div>
             </form>
             <div id="senha-message" class="form-message" role="status" aria-live="polite"></div>
+          </div>
+
+          <div id="panel-productivity" class="tab-panel hidden">
+            <div class="prod-header">
+              <div>
+                <h3>Produtividade por administrador de categoria</h3>
+                <p class="preview-label">Ações registradas no histórico das ocorrências: mudanças de status e atualizações de atendimento.</p>
+              </div>
+              <label class="prod-period">
+                Período
+                <select id="prod-period">
+                  <option value="7">Últimos 7 dias</option>
+                  <option value="30" selected>Últimos 30 dias</option>
+                  <option value="90">Últimos 90 dias</option>
+                  <option value="0">Todo o histórico</option>
+                </select>
+              </label>
+            </div>
+
+            <div id="prod-tiles" class="prod-tiles" aria-live="polite"></div>
+
+            <figure class="prod-chart">
+              <figcaption>
+                <strong>Ocorrências resolvidas por usuário</strong>
+                <span class="prod-chart-note">no período selecionado</span>
+              </figcaption>
+              <div id="prod-chart" class="prod-chart-body"></div>
+            </figure>
+
+            <div class="table-wrap">
+              <table class="prod-table">
+                <thead>
+                  <tr>
+                    <th>Usuário</th>
+                    <th>Categorias</th>
+                    <th class="num">Resolvidas</th>
+                    <th class="num">Mudanças de status</th>
+                    <th class="num">Atualizações</th>
+                    <th class="num">Ocorrências tocadas</th>
+                    <th class="num">Tempo médio p/ resolver</th>
+                    <th class="num">Abertas nas categorias</th>
+                    <th>Última atividade</th>
+                  </tr>
+                </thead>
+                <tbody id="prod-table-body"></tbody>
+              </table>
+            </div>
+            <div id="prod-message" class="form-message" role="status" aria-live="polite"></div>
           </div>
 
           <div id="panel-notifications" class="tab-panel hidden">

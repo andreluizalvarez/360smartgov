@@ -233,6 +233,7 @@ h2 {
 
 .admin-tabs .tab-buttons {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.5rem;
   margin: 0 0 1rem 0;
 }
@@ -256,6 +257,10 @@ h2 {
   border-radius: 12px;
   background: rgba(255,255,255,0.8);
   border: 1px solid var(--border);
+  /* Conteudo largo (tabelas) rola dentro do painel, nunca alarga a pagina. */
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
 }
 
 .admin-list .admin-list-item {
@@ -395,8 +400,15 @@ h2 {
 
 .app-shell {
   display: grid;
+  /* minmax(0, 1fr): o item do grid pode encolher abaixo do conteudo minimo,
+     senao uma tabela larga alarga a pagina inteira em vez de rolar. */
+  grid-template-columns: minmax(0, 1fr);
   gap: 1.5rem;
   padding: 1rem 0 3rem;
+}
+
+.app-shell > * {
+  min-width: 0;
 }
 
 .form-grid {
@@ -902,6 +914,152 @@ select.status-select {
 
 .diag-list li.erro::before {
   color: #c84b4b;
+}
+
+/* Produtividade */
+.prod-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.prod-header h3 {
+  margin-bottom: 0.3rem;
+}
+
+.prod-period {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.9rem;
+  min-width: 200px;
+}
+
+.prod-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 0.75rem;
+  margin: 1rem 0 1.25rem;
+}
+
+.prod-tile {
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: #fbfdfa;
+}
+
+.prod-tile .valor {
+  display: block;
+  font-size: 1.9rem;
+  font-weight: 700;
+  line-height: 1.1;
+  color: var(--text);
+}
+
+.prod-tile .rotulo {
+  display: block;
+  margin-top: 0.25rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.prod-chart {
+  margin: 0 0 1.25rem;
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: #ffffff;
+}
+
+.prod-chart figcaption {
+  display: flex;
+  gap: 0.5rem;
+  align-items: baseline;
+  flex-wrap: wrap;
+  margin-bottom: 0.6rem;
+}
+
+.prod-chart-note {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.prod-chart-body svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  font: 500 13px system-ui, sans-serif;
+}
+
+.prod-chart-body .barra {
+  fill: #2e9e62;
+}
+
+.prod-chart-body .barra-hit {
+  fill: transparent;
+}
+
+.prod-chart-body .barra-hit:hover + .barra,
+.prod-chart-body .barra-hit:focus + .barra {
+  fill: #1f6b39;
+}
+
+.prod-chart-body .eixo {
+  stroke: rgba(18, 50, 63, 0.18);
+  stroke-width: 1;
+}
+
+.prod-chart-body .rotulo-y {
+  fill: var(--text);
+}
+
+.prod-chart-body .valor-barra {
+  fill: var(--muted);
+}
+
+.prod-chart-vazio {
+  padding: 1.5rem;
+  text-align: center;
+  color: var(--muted);
+}
+
+.table-wrap {
+  overflow-x: auto;
+}
+
+.prod-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.92rem;
+}
+
+.prod-table th,
+.prod-table td {
+  padding: 0.55rem 0.7rem;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.prod-table th {
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.prod-table .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.prod-table td.categorias {
+  white-space: normal;
+  max-width: 260px;
+  color: var(--muted);
 }
 
 [hidden] {

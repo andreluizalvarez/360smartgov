@@ -437,8 +437,8 @@ function syncUsersWithCurrentCategories() {
 }
 
 function updateTabVisibilityByRole() {
-  const restrictedTabs = [tabCategories, tabPriorities, tabUsers, tabNotifications];
-  const restrictedPanels = [panelCategories, panelPriorities, panelUsers, panelNotifications];
+  const restrictedTabs = [tabCategories, tabPriorities, tabUsers, tabNotifications, tabProductivity];
+  const restrictedPanels = [panelCategories, panelPriorities, panelUsers, panelNotifications, panelProductivity];
 
   if (isSystemAdmin()) {
     restrictedTabs.forEach((tab) => {
@@ -2115,6 +2115,133 @@ if (senhaForm) {
   });
 }
 
+// ---------- Produtividade dos administradores de categoria ----------
+const prodPeriod = document.getElementById('prod-period');
+const prodTiles = document.getElementById('prod-tiles');
+const prodChart = document.getElementById('prod-chart');
+const prodTableBody = document.getElementById('prod-table-body');
+const prodMessage = document.getElementById('prod-message');
+
+function formatarHoras(horas) {
+  if (horas === null || horas === undefined) return '—';
+  if (horas < 1) return `${Math.round(horas * 60)} min`;
+  if (horas < 48) return `${horas.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} h`;
+  return `${(horas / 24).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} dias`;
+}
+
+function formatarDataHora(iso) {
+  if (!iso) return '—';
+  const data = new Date(iso);
+  return Number.isNaN(data.getTime()) ? '—' : data.toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
+}
+
+function renderProdTiles(resumo) {
+  if (!prodTiles) return;
+  const tiles = [
+    [resumo.resolvidas, 'ocorrências resolvidas'],
+    [resumo.acoes, 'ações registradas'],
+    [`${resumo.ativos}/${resumo.usuarios}`, 'usuários ativos'],
+    [formatarHoras(resumo.horasMediasResolucao), 'tempo médio para resolver']
+  ];
+  prodTiles.innerHTML = tiles.map(([valor, rotulo]) => `
+    <div class="prod-tile"><span class="valor">${escapeHtml(String(valor))}</span><span class="rotulo">${rotulo}</span></div>`).join('');
+}
+
+// Barras horizontais em SVG: uma serie (sem legenda), valor na ponta, tooltip
+// nativo por barra e a tabela abaixo como leitura alternativa.
+function renderProdChart(usuarios) {
+  if (!prodChart) return;
+  const dados = usuarios.filter((u) => u.resolvidas > 0 || u.acoes > 0);
+  if (!dados.length) {
+    prodChart.innerHTML = '<p class="prod-chart-vazio">Nenhuma ação registrada no período.</p>';
+    return;
+  }
+
+  // Desenha na largura real do contêiner: o SVG não é escalado, então o texto
+  // mantém o tamanho de leitura também no celular.
+  const largura = Math.max(320, Math.round(prodChart.clientWidth || 720));
+  const maiorNome = Math.max(...dados.map((u) => u.username.length));
+  const margemEsq = Math.min(Math.round(largura * 0.35), Math.max(90, maiorNome * 8 + 16));
+  const margemDir = 48;
+  const alturaLinha = 34;
+  const espessura = 20;
+  const altura = dados.length * alturaLinha + 12;
+  const maximo = Math.max(1, ...dados.map((u) => u.resolvidas));
+  const escala = (largura - margemEsq - margemDir) / maximo;
+
+  const barras = dados.map((u, i) => {
+    const y = 6 + i * alturaLinha;
+    const w = Math.max(0, u.resolvidas * escala);
+    const nome = escapeHtml(u.username);
+    const titulo = `${u.username}: ${u.resolvidas} resolvida(s), ${u.acoes} ação(ões)`;
+    // ponta arredondada (4px) so no lado do dado; base reta no eixo
+    const r = w > 4 ? 4 : 0;
+    const caminho = `M${margemEsq},${y} h${Math.max(0, w - r)} a${r},${r} 0 0 1 ${r},${r} v${espessura - 2 * r} a${r},${r} 0 0 1 -${r},${r} h-${Math.max(0, w - r)} z`;
+    return `
+      <text class="rotulo-y" x="${margemEsq - 10}" y="${y + espessura / 2}" text-anchor="end" dominant-baseline="middle">${nome}</text>
+      <rect class="barra-hit" x="${margemEsq}" y="${y - 6}" width="${largura - margemEsq}" height="${alturaLinha}" tabindex="0"><title>${escapeHtml(titulo)}</title></rect>
+      <path class="barra" d="${caminho}"><title>${escapeHtml(titulo)}</title></path>
+      <text class="valor-barra" x="${margemEsq + w + 8}" y="${y + espessura / 2}" dominant-baseline="middle">${u.resolvidas}</text>`;
+  }).join('');
+
+  prodChart.innerHTML = `
+    <svg viewBox="0 0 ${largura} ${altura}" width="${largura}" height="${altura}" role="img" aria-label="Ocorrências resolvidas por usuário">
+      <line class="eixo" x1="${margemEsq}" y1="0" x2="${margemEsq}" y2="${altura}" />
+      ${barras}
+    </svg>`;
+}
+
+function renderProdTable(usuarios) {
+  if (!prodTableBody) return;
+  if (!usuarios.length) {
+    prodTableBody.innerHTML = '<tr><td colspan="9">Nenhum administrador de categoria cadastrado.</td></tr>';
+    return;
+  }
+  prodTableBody.innerHTML = usuarios.map((u) => `
+    <tr>
+      <td><strong>${escapeHtml(u.username)}</strong></td>
+      <td class="categorias">${escapeHtml(u.categorias.join(', ') || '—')}</td>
+      <td class="num">${u.resolvidas}</td>
+      <td class="num">${u.mudancasStatus}</td>
+      <td class="num">${u.atualizacoes}</td>
+      <td class="num">${u.ocorrenciasTocadas}</td>
+      <td class="num">${formatarHoras(u.horasMediasResolucao)}</td>
+      <td class="num">${u.abertasNaCategoria}</td>
+      <td>${formatarDataHora(u.ultimaAtividade)}</td>
+    </tr>`).join('');
+}
+
+let ultimaProdutividade = null;
+let prodResizeTimer = null;
+window.addEventListener('resize', () => {
+  if (!ultimaProdutividade || !panelProductivity || panelProductivity.classList.contains('hidden')) return;
+  clearTimeout(prodResizeTimer);
+  prodResizeTimer = setTimeout(() => renderProdChart(ultimaProdutividade.usuarios), 150);
+});
+
+async function carregarProdutividade() {
+  if (!panelProductivity || !isSystemAdmin()) return;
+  const dias = prodPeriod ? prodPeriod.value : '30';
+  showMessage(prodMessage, 'Carregando...', false);
+  try {
+    const resposta = await apiAutenticada(`/api/incidentes/produtividade?dias=${encodeURIComponent(dias)}`);
+    const dados = await resposta.json().catch(() => ({}));
+    if (!resposta.ok) {
+      showMessage(prodMessage, dados.error || 'Não foi possível carregar a produtividade.', true);
+      return;
+    }
+    ultimaProdutividade = dados;
+    renderProdTiles(dados.resumo);
+    renderProdChart(dados.usuarios);
+    renderProdTable(dados.usuarios);
+    showMessage(prodMessage, '', false);
+  } catch (error) {
+    showMessage(prodMessage, 'Não foi possível falar com o servidor.', true);
+  }
+}
+
+if (prodPeriod) prodPeriod.addEventListener('change', carregarProdutividade);
+
 // ---------- Notificacoes: diagnostico e teste de e-mail ----------
 const emailStatus = document.getElementById('email-status');
 const emailChecks = document.getElementById('email-checks');
@@ -2346,19 +2473,21 @@ const tabPriorities = document.getElementById('tab-priorities');
 const tabUsers = document.getElementById('tab-users');
 const tabPassword = document.getElementById('tab-password');
 const tabNotifications = document.getElementById('tab-notifications');
+const tabProductivity = document.getElementById('tab-productivity');
 const panelOccurrences = document.getElementById('panel-occurrences');
 const panelCategories = document.getElementById('panel-categories');
 const panelPriorities = document.getElementById('panel-priorities');
 const panelUsers = document.getElementById('panel-users');
 const panelPassword = document.getElementById('panel-password');
 const panelNotifications = document.getElementById('panel-notifications');
+const panelProductivity = document.getElementById('panel-productivity');
 
 function switchTab(tab) {
   // reset active
-  [tabOccurrences, tabCategories, tabPriorities, tabUsers, tabPassword, tabNotifications].forEach((b) => b && b.classList.remove('active'));
-  [panelOccurrences, panelCategories, panelPriorities, panelUsers, panelPassword, panelNotifications].forEach((p) => p && p.classList.add('hidden'));
+  [tabOccurrences, tabCategories, tabPriorities, tabUsers, tabPassword, tabNotifications, tabProductivity].forEach((b) => b && b.classList.remove('active'));
+  [panelOccurrences, panelCategories, panelPriorities, panelUsers, panelPassword, panelNotifications, panelProductivity].forEach((p) => p && p.classList.add('hidden'));
 
-  if (!isSystemAdmin() && (tab === 'categories' || tab === 'priorities' || tab === 'users' || tab === 'notifications')) {
+  if (!isSystemAdmin() && (tab === 'categories' || tab === 'priorities' || tab === 'users' || tab === 'notifications' || tab === 'productivity')) {
     tab = 'occurrences';
   }
 
@@ -2401,6 +2530,11 @@ function switchTab(tab) {
     tabNotifications.classList.add('active');
     panelNotifications.classList.remove('hidden');
   }
+  if (tab === 'productivity') {
+    tabProductivity.classList.add('active');
+    panelProductivity.classList.remove('hidden');
+    carregarProdutividade();
+  }
 }
 
 if (tabOccurrences) tabOccurrences.addEventListener('click', () => switchTab('occurrences'));
@@ -2409,6 +2543,7 @@ if (tabPriorities) tabPriorities.addEventListener('click', () => switchTab('prio
 if (tabUsers) tabUsers.addEventListener('click', () => switchTab('users'));
 if (tabPassword) tabPassword.addEventListener('click', () => switchTab('password'));
 if (tabNotifications) tabNotifications.addEventListener('click', () => switchTab('notifications'));
+if (tabProductivity) tabProductivity.addEventListener('click', () => switchTab('productivity'));
 
 if (newAdminRoleSelect) {
   newAdminRoleSelect.addEventListener('change', updateAdminRoleUi);

@@ -163,7 +163,95 @@ function criarIncidentes({ diretorioDados, papelAdminSistema }) {
     return { removidas: quantidade };
   }
 
-  return { listar, criar, atualizar, remover, limpar, CAMPOS_EDITAVEIS };
+  // Produtividade dos administradores de categoria, calculada a partir do
+  // historico de cada ocorrencia (quem mudou o status ou registrou trabalho,
+  // e quando). `dias` = 0 considera tudo.
+  function produtividade(usuarios, dias = 30) {
+    const todas = ler();
+    const agora = Date.now();
+    const inicio = dias > 0 ? agora - dias * 24 * 60 * 60 * 1000 : 0;
+    const noPeriodo = (data) => {
+      const t = Date.parse(data || '');
+      return Number.isFinite(t) && t >= inicio && t <= agora;
+    };
+
+    const operadores = (usuarios || []).filter((u) => u.role !== papelAdminSistema);
+
+    const linhas = operadores.map((usuario) => {
+      const permitidas = new Set((usuario.allowedCategories || []).map(comparavel));
+      const daCategoria = todas.filter((item) => permitidas.has(comparavel(item.category)));
+
+      let mudancasStatus = 0;
+      let atualizacoes = 0;
+      let resolvidas = 0;
+      let somaHorasResolucao = 0;
+      let ultimaAtividade = null;
+      const ocorrenciasTocadas = new Set();
+
+      for (const item of todas) {
+        const historico = Array.isArray(item.history) ? item.history : [];
+        for (const entrada of historico) {
+          if (!entrada || entrada.by !== usuario.username || !noPeriodo(entrada.at)) continue;
+          ocorrenciasTocadas.add(item.id);
+          if (!ultimaAtividade || entrada.at > ultimaAtividade) ultimaAtividade = entrada.at;
+
+          if (entrada.type === 'work') {
+            atualizacoes += 1;
+          } else if (entrada.type === 'status') {
+            mudancasStatus += 1;
+            if (/para Resolvido$/i.test(entrada.text || '')) {
+              resolvidas += 1;
+              const abertura = Date.parse(item.createdAt || '');
+              const fechamento = Date.parse(entrada.at || '');
+              if (Number.isFinite(abertura) && Number.isFinite(fechamento) && fechamento >= abertura) {
+                somaHorasResolucao += (fechamento - abertura) / 3600000;
+              }
+            }
+          }
+        }
+      }
+
+      return {
+        id: usuario.id,
+        username: usuario.username,
+        categorias: usuario.allowedCategories || [],
+        naCategoria: daCategoria.length,
+        abertasNaCategoria: daCategoria.filter((item) => item.status !== 'Resolvido').length,
+        novasNoPeriodo: daCategoria.filter((item) => noPeriodo(item.createdAt)).length,
+        ocorrenciasTocadas: ocorrenciasTocadas.size,
+        mudancasStatus,
+        atualizacoes,
+        acoes: mudancasStatus + atualizacoes,
+        resolvidas,
+        horasMediasResolucao: resolvidas ? Math.round((somaHorasResolucao / resolvidas) * 10) / 10 : null,
+        ultimaAtividade
+      };
+    });
+
+    linhas.sort((a, b) => b.resolvidas - a.resolvidas || b.acoes - a.acoes || a.username.localeCompare(b.username));
+
+    const total = linhas.reduce((acc, linha) => {
+      acc.acoes += linha.acoes;
+      acc.resolvidas += linha.resolvidas;
+      if (linha.acoes > 0) acc.ativos += 1;
+      return acc;
+    }, { acoes: 0, resolvidas: 0, ativos: 0 });
+
+    const comMedia = linhas.filter((linha) => linha.horasMediasResolucao !== null);
+    const horasMedias = comMedia.length
+      ? Math.round((comMedia.reduce((acc, linha) => acc + linha.horasMediasResolucao * linha.resolvidas, 0)
+          / comMedia.reduce((acc, linha) => acc + linha.resolvidas, 0)) * 10) / 10
+      : null;
+
+    return {
+      dias,
+      geradoEm: new Date(agora).toISOString(),
+      resumo: { usuarios: linhas.length, ativos: total.ativos, acoes: total.acoes, resolvidas: total.resolvidas, horasMediasResolucao: horasMedias },
+      usuarios: linhas
+    };
+  }
+
+  return { listar, criar, atualizar, remover, limpar, produtividade, CAMPOS_EDITAVEIS };
 }
 
 module.exports = { criarIncidentes, STATUS_INICIAL };

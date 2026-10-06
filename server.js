@@ -699,6 +699,12 @@ app.delete('/api/incidentes/:id', auth.exigirAutenticacao, (req, res) => {
   return res.json(resultado);
 });
 
+// Produtividade dos administradores de categoria (so admin do sistema).
+app.get('/api/incidentes/produtividade', auth.exigirAdminSistema, (req, res) => {
+  const dias = Math.max(0, Math.min(365, Number(req.query.dias ?? 30) || 0));
+  return res.json(incidentes.produtividade(auth.listarUsuarios(), dias));
+});
+
 app.delete('/api/incidentes', auth.exigirAdminSistema, (req, res) => {
   return res.json(incidentes.limpar());
 });

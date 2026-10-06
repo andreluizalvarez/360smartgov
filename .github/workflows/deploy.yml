@@ -6,6 +6,8 @@
 #   SSH_PRIVATE_KEY  chave privada de deploy, conteudo completo do arquivo
 #   APP_PATH         pasta do app no servidor (ex: /var/www/360smartgov)
 #   RESTART_COMMAND  comando que reinicia o app (ex: pm2 restart smartgov360)
+#   APP_ENV          (opcional) conteudo completo do .env de producao; quando
+#                    definido, e gravado em $APP_PATH/.env a cada deploy
 # Variaveis opcionais (aba Variables):
 #   SSH_HOST         padrao 104.248.54.178
 #   SSH_PORT         padrao 22
@@ -71,11 +73,17 @@ jobs:
           SSH_USER: ${{ secrets.SSH_USER }}
           APP_PATH: ${{ secrets.APP_PATH }}
           RESTART_COMMAND: ${{ secrets.RESTART_COMMAND }}
+          # Opcional: conteudo completo do .env de producao. Quando definido, e
+          # gravado no servidor a cada deploy (o .env nao vai pelo git).
+          APP_ENV: ${{ secrets.APP_ENV }}
         run: |
+          # Multi-linha nao passa com seguranca pela linha de comando do ssh:
+          # vai em base64, numa unica linha.
+          APP_ENV_B64=$(printf '%s' "$APP_ENV" | base64 -w0)
           ssh -i ~/.ssh/id_deploy -p "$SSH_PORT" \
             -o BatchMode=yes -o StrictHostKeyChecking=yes \
             "$SSH_USER@$SSH_HOST" \
-            "APP_PATH='$APP_PATH' RESTART_COMMAND='$RESTART_COMMAND' bash -s" <<'REMOTO'
+            "APP_PATH='$APP_PATH' RESTART_COMMAND='$RESTART_COMMAND' APP_ENV_B64='$APP_ENV_B64' bash -s" <<'REMOTO'
           set -euo pipefail
 
           if [ ! -d "$APP_PATH/.git" ]; then
@@ -94,6 +102,16 @@ jobs:
           echo "--- Nova versao:  $(git rev-parse --short HEAD)"
 
           npm ci --omit=dev
+
+          if [ -n "${APP_ENV_B64:-}" ]; then
+            echo "--- Gravando o .env a partir do secret APP_ENV"
+            [ -f .env ] && cp .env .env.anterior
+            printf '%s' "$APP_ENV_B64" | base64 -d > .env.novo
+            chmod 600 .env.novo
+            mv .env.novo .env
+          else
+            echo "--- Secret APP_ENV nao definido: o .env do servidor segue como esta"
+          fi
 
           echo "--- Reiniciando o app"
           eval "$RESTART_COMMAND"

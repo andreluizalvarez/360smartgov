@@ -67,6 +67,7 @@
               <button id="tab-priorities" class="tab-button" role="tab">Prioridades</button>
               <button id="tab-users" class="tab-button" role="tab">Usuários</button>
               <button id="tab-password" class="tab-button" role="tab">Minha senha</button>
+              <button id="tab-notifications" class="tab-button" role="tab">Notificações</button>
             </div>
           </div>
 
@@ -210,6 +211,27 @@
               </div>
             </form>
             <div id="senha-message" class="form-message" role="status" aria-live="polite"></div>
+          </div>
+
+          <div id="panel-notifications" class="tab-panel hidden">
+            <h3>Envio de e-mail ao cidadão</h3>
+            <p class="preview-label">Confira se o servidor consegue enviar e-mails e faça um envio de teste.</p>
+            <div id="email-status" class="email-status">Clique em <strong>Verificar</strong> para consultar o servidor.</div>
+            <div class="field full" style="display:flex; gap:8px; flex-wrap:wrap;">
+              <button id="email-diagnose-btn" type="button" class="btn btn-secondary">Verificar</button>
+            </div>
+            <ul id="email-checks" class="diag-list"></ul>
+
+            <form id="email-test-form" class="form-grid compact" autocomplete="off">
+              <div class="field">
+                <label for="email-test-to">Enviar e-mail de teste para</label>
+                <input id="email-test-to" type="email" placeholder="voce@exemplo.com" required />
+              </div>
+              <div class="field full">
+                <button class="btn btn-secondary" type="submit">Enviar teste</button>
+              </div>
+            </form>
+            <div id="email-message" class="form-message" role="status" aria-live="polite"></div>
           </div>
 
           <div style="margin-top:16px; display:flex; gap:10px; flex-wrap:wrap;">

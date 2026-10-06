@@ -853,6 +853,57 @@ select.status-select {
   }
 }
 
+/* Painel de notificacoes: estado do e-mail e checagens de conexao */
+.email-status {
+  margin: 0.6rem 0 0.9rem;
+  padding: 0.8rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: #f7f9f7;
+  line-height: 1.5;
+}
+
+.email-status.ok {
+  border-color: rgba(46, 158, 98, 0.5);
+  background: #eef9f2;
+}
+
+.email-status.erro {
+  border-color: rgba(212, 106, 106, 0.6);
+  background: #fbeeee;
+}
+
+.diag-list {
+  list-style: none;
+  margin: 0 0 1.2rem;
+  padding: 0;
+  display: grid;
+  gap: 0.4rem;
+}
+
+.diag-list li {
+  display: flex;
+  gap: 0.6rem;
+  align-items: baseline;
+  padding: 0.5rem 0.8rem;
+  border-radius: 10px;
+  background: #f7f9f7;
+  font-size: 0.92rem;
+}
+
+.diag-list li::before {
+  content: '●';
+  color: var(--muted);
+}
+
+.diag-list li.ok::before {
+  color: #2e9e62;
+}
+
+.diag-list li.erro::before {
+  color: #c84b4b;
+}
+
 [hidden] {
   display: none !important;
 }

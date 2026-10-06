@@ -138,8 +138,23 @@ console: `smartgovIncidentes.migrarLocaisParaServidor()`.
 - Uma nova notificação é enviada quando o status da ocorrência é alterado no painel admin.
 - E-mail e WhatsApp são disparados em paralelo quando os provedores estiverem configurados.
 
-## Observação sobre Gmail
+## E-mail: provedores e diagnóstico
 
-- Para Gmail SMTP, ative verificação em duas etapas na conta Google.
-- Gere uma App Password e use no campo GMAIL_APP_PASSWORD.
-- Não use a senha normal da conta Google no SMTP.
+O painel administrativo tem a aba **Notificações** (administrador do sistema),
+que mostra o provedor em uso, testa as conexões de saída do servidor e envia um
+e-mail de teste. Use-a sempre que alterar o `.env`.
+
+Servidores em nuvem costumam **bloquear as portas de SMTP** (25, 465 e 587).
+Quando isso acontece, o Gmail SMTP falha com "Connection timeout" e nenhuma
+notificação sai. A solução é usar um provedor por HTTPS:
+
+- **Brevo** (recomendado): gratuito até 300 e-mails/dia. Crie a conta em
+  brevo.com, verifique o e-mail remetente em *Senders & IP*, gere uma chave em
+  *SMTP & API > API Keys* e defina `BREVO_API_KEY`, `BREVO_FROM_EMAIL` e
+  `EMAIL_PROVIDER=brevo` no `.env` do servidor. Reinicie o app.
+- **Resend**: exige um domínio próprio verificado. Defina `RESEND_API_KEY`,
+  `RESEND_FROM_EMAIL` e `EMAIL_PROVIDER=resend`.
+- **Gmail SMTP**: só funciona se o provedor de hospedagem liberar a porta de
+  saída (na DigitalOcean, por pedido ao suporte). Ative a verificação em duas
+  etapas na conta Google, gere uma senha de app e use em `GMAIL_APP_PASSWORD`.
+  O servidor tenta a porta 465 e depois a 587; `GMAIL_SMTP_PORT` fixa uma delas.

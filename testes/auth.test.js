@@ -69,7 +69,7 @@ async function esperarServidor() {
   }
 
   const servidor = spawn(process.execPath, ['server.js'], {
-    cwd: RAIZ, env: { ...process.env, PORT: String(PORTA), ADMIN_INITIAL_PASSWORD: 'admin123' }, stdio: ['ignore', 'pipe', 'pipe']
+    cwd: RAIZ, env: { ...process.env, PORT: String(PORTA), ADMIN_INITIAL_PASSWORD: 'admin123', EMAIL_PROVIDER: 'nenhum' }, stdio: ['ignore', 'pipe', 'pipe']
   });
   servidor.stderr.on('data', (d) => console.log('[servidor]', d.toString().trim().slice(0, 200)));
 
@@ -228,6 +228,23 @@ async function esperarServidor() {
         username: 'operador', role: 'category_admin', allowedCategories: ['buracos']
       }, token);
       ok(volta.status === 200, 'volta ao perfil de categoria');
+    }
+
+    console.log('\nDiagnostico e teste de e-mail');
+    {
+      const semToken = await pedir('GET', '/api/auth/email/diagnostico');
+      ok(semToken.status === 401, 'diagnostico sem token responde 401');
+
+      const loginOp = await pedir('POST', '/api/auth/login', { username: 'operador', password: 'outraSenha9' });
+      const comoOperador = await pedir('GET', '/api/auth/email/diagnostico', null, loginOp.corpo.token);
+      ok(comoOperador.status === 403, 'admin de categoria nao acessa o diagnostico');
+
+      const invalido = await pedir('POST', '/api/auth/email/teste', { para: 'nao-e-email' }, token);
+      ok(invalido.status === 400, 'e-mail de destino invalido e recusado');
+
+      const teste = await pedir('POST', '/api/auth/email/teste', { para: 'alguem@example.com' }, token);
+      ok(teste.status === 207 && teste.corpo.sent === false && typeof teste.corpo.reason === 'string', 'sem provedor configurado o teste responde 207 com o motivo');
+      ok(teste.corpo.provedor === 'nenhum', 'informa que nenhum provedor esta configurado');
     }
 
     console.log('\nRegras de cadastro e remocao');

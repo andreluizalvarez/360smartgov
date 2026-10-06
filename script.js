@@ -437,8 +437,8 @@ function syncUsersWithCurrentCategories() {
 }
 
 function updateTabVisibilityByRole() {
-  const restrictedTabs = [tabCategories, tabPriorities, tabUsers];
-  const restrictedPanels = [panelCategories, panelPriorities, panelUsers];
+  const restrictedTabs = [tabCategories, tabPriorities, tabUsers, tabNotifications];
+  const restrictedPanels = [panelCategories, panelPriorities, panelUsers, panelNotifications];
 
   if (isSystemAdmin()) {
     restrictedTabs.forEach((tab) => {
@@ -2115,6 +2115,103 @@ if (senhaForm) {
   });
 }
 
+// ---------- Notificacoes: diagnostico e teste de e-mail ----------
+const emailStatus = document.getElementById('email-status');
+const emailChecks = document.getElementById('email-checks');
+const emailDiagnoseBtn = document.getElementById('email-diagnose-btn');
+const emailTestForm = document.getElementById('email-test-form');
+const emailTestTo = document.getElementById('email-test-to');
+const emailMessage = document.getElementById('email-message');
+
+const NOMES_PROVEDOR = { gmail: 'Gmail SMTP', resend: 'Resend', brevo: 'Brevo', nenhum: 'nenhum' };
+
+async function diagnosticarEmail() {
+  if (!ensureSystemAdminAction()) return;
+  if (emailDiagnoseBtn) emailDiagnoseBtn.disabled = true;
+  if (emailStatus) {
+    emailStatus.className = 'email-status';
+    emailStatus.textContent = 'Consultando o servidor...';
+  }
+  if (emailChecks) emailChecks.innerHTML = '';
+
+  try {
+    const resposta = await apiAutenticada('/api/auth/email/diagnostico');
+    const d = await resposta.json().catch(() => ({}));
+    if (!resposta.ok) {
+      if (emailStatus) {
+        emailStatus.className = 'email-status erro';
+        emailStatus.textContent = d.error || 'Não foi possível consultar o servidor.';
+      }
+      return;
+    }
+
+    const nome = NOMES_PROVEDOR[d.provedor] || d.provedor;
+    const conexaoDoProvedor = d.conexoes.find((c) =>
+      (d.provedor === 'gmail' && c.host === 'smtp.gmail.com' && c.ok) ||
+      (d.provedor === 'brevo' && c.host === 'api.brevo.com' && c.ok) ||
+      (d.provedor === 'resend' && c.host === 'api.resend.com' && c.ok));
+
+    if (emailStatus) {
+      if (!d.configurado) {
+        emailStatus.className = 'email-status erro';
+        emailStatus.textContent = 'Nenhum provedor de e-mail configurado no servidor (arquivo .env).';
+      } else if (!conexaoDoProvedor) {
+        emailStatus.className = 'email-status erro';
+        emailStatus.textContent = `Provedor configurado: ${nome} (remetente ${d.remetente}). O servidor não consegue se conectar a ele — veja as checagens abaixo.`;
+      } else {
+        emailStatus.className = 'email-status ok';
+        emailStatus.textContent = `Provedor configurado: ${nome} (remetente ${d.remetente}). Conexão de saída disponível. Faça um envio de teste para confirmar as credenciais.`;
+      }
+    }
+
+    if (emailChecks) {
+      emailChecks.innerHTML = d.conexoes.map((c) => `
+        <li class="${c.ok ? 'ok' : 'erro'}">
+          <strong>${escapeHtml(c.nome)}</strong>
+          <span>${escapeHtml(c.host)}:${c.port} — ${escapeHtml(c.detalhe)} (${c.ms} ms)</span>
+        </li>`).join('')
+        + `<li class="${d.whatsapp ? 'ok' : ''}"><strong>WhatsApp (Twilio)</strong><span>${d.whatsapp ? 'configurado' : 'não configurado'}</span></li>`;
+    }
+  } catch (error) {
+    if (emailStatus) {
+      emailStatus.className = 'email-status erro';
+      emailStatus.textContent = 'Não foi possível falar com o servidor.';
+    }
+  } finally {
+    if (emailDiagnoseBtn) emailDiagnoseBtn.disabled = false;
+  }
+}
+
+if (emailDiagnoseBtn) emailDiagnoseBtn.addEventListener('click', diagnosticarEmail);
+
+if (emailTestForm) {
+  emailTestForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    if (!ensureSystemAdminAction()) return;
+    const para = emailTestTo?.value?.trim() || '';
+    const botao = emailTestForm.querySelector('button[type="submit"]');
+    if (botao) botao.disabled = true;
+    showMessage(emailMessage, 'Enviando e-mail de teste...', false);
+
+    try {
+      const resposta = await apiAutenticada('/api/auth/email/teste', {
+        method: 'POST',
+        body: JSON.stringify({ para })
+      });
+      const r = await resposta.json().catch(() => ({}));
+      if (resposta.status === 200 && r.sent) {
+        showMessage(emailMessage, `E-mail de teste enviado para ${para} via ${NOMES_PROVEDOR[r.provedor] || r.provedor}. Confira a caixa de entrada (e o spam).`, false);
+      } else {
+        showMessage(emailMessage, r.error || `Falha no envio${r.provedor ? ' via ' + (NOMES_PROVEDOR[r.provedor] || r.provedor) : ''}: ${r.reason || 'motivo desconhecido'}`, true);
+      }
+    } catch (error) {
+      showMessage(emailMessage, 'Não foi possível falar com o servidor.', true);
+    } finally {
+      if (botao) botao.disabled = false;
+    }
+  });
+}
+
 if (logoutBtn) {
   logoutBtn.addEventListener('click', () => {
     // Encerra a sessao no servidor descartando o token.
@@ -2248,18 +2345,20 @@ const tabCategories = document.getElementById('tab-categories');
 const tabPriorities = document.getElementById('tab-priorities');
 const tabUsers = document.getElementById('tab-users');
 const tabPassword = document.getElementById('tab-password');
+const tabNotifications = document.getElementById('tab-notifications');
 const panelOccurrences = document.getElementById('panel-occurrences');
 const panelCategories = document.getElementById('panel-categories');
 const panelPriorities = document.getElementById('panel-priorities');
 const panelUsers = document.getElementById('panel-users');
 const panelPassword = document.getElementById('panel-password');
+const panelNotifications = document.getElementById('panel-notifications');
 
 function switchTab(tab) {
   // reset active
-  [tabOccurrences, tabCategories, tabPriorities, tabUsers, tabPassword].forEach((b) => b && b.classList.remove('active'));
-  [panelOccurrences, panelCategories, panelPriorities, panelUsers, panelPassword].forEach((p) => p && p.classList.add('hidden'));
+  [tabOccurrences, tabCategories, tabPriorities, tabUsers, tabPassword, tabNotifications].forEach((b) => b && b.classList.remove('active'));
+  [panelOccurrences, panelCategories, panelPriorities, panelUsers, panelPassword, panelNotifications].forEach((p) => p && p.classList.add('hidden'));
 
-  if (!isSystemAdmin() && (tab === 'categories' || tab === 'priorities' || tab === 'users')) {
+  if (!isSystemAdmin() && (tab === 'categories' || tab === 'priorities' || tab === 'users' || tab === 'notifications')) {
     tab = 'occurrences';
   }
 
@@ -2298,6 +2397,10 @@ function switchTab(tab) {
     tabPassword.classList.add('active');
     panelPassword.classList.remove('hidden');
   }
+  if (tab === 'notifications') {
+    tabNotifications.classList.add('active');
+    panelNotifications.classList.remove('hidden');
+  }
 }
 
 if (tabOccurrences) tabOccurrences.addEventListener('click', () => switchTab('occurrences'));
@@ -2305,6 +2408,7 @@ if (tabCategories) tabCategories.addEventListener('click', () => switchTab('cate
 if (tabPriorities) tabPriorities.addEventListener('click', () => switchTab('priorities'));
 if (tabUsers) tabUsers.addEventListener('click', () => switchTab('users'));
 if (tabPassword) tabPassword.addEventListener('click', () => switchTab('password'));
+if (tabNotifications) tabNotifications.addEventListener('click', () => switchTab('notifications'));
 
 if (newAdminRoleSelect) {
   newAdminRoleSelect.addEventListener('change', updateAdminRoleUi);

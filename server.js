@@ -1,6 +1,7 @@
 const express = require('express');
 const path = require('path');
 const fs = require('fs');
+const net = require('net');
 const { criarAuth } = require('./auth');
 const { criarIncidentes } = require('./incidentes');
 require('dotenv').config();
@@ -22,8 +23,12 @@ const EMAIL_PROVIDER = (process.env.EMAIL_PROVIDER || 'auto').toLowerCase();
 const GMAIL_USER = (process.env.GMAIL_USER || '').trim();
 const GMAIL_APP_PASSWORD = (process.env.GMAIL_APP_PASSWORD || '').replace(/\s+/g, '');
 const GMAIL_FROM_EMAIL = (process.env.GMAIL_FROM_EMAIL || '').trim();
+const GMAIL_SMTP_PORT = Number(process.env.GMAIL_SMTP_PORT) || 0;   // 0 = tenta 465 e depois 587
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
 const RESEND_FROM_EMAIL = process.env.RESEND_FROM_EMAIL;
+const BREVO_API_KEY = (process.env.BREVO_API_KEY || '').trim();
+const BREVO_FROM_EMAIL = (process.env.BREVO_FROM_EMAIL || '').trim();
+const BREVO_FROM_NAME = (process.env.BREVO_FROM_NAME || 'SmartGov 360').trim();
 const TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID;
 const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN;
 const TWILIO_WHATSAPP_FROM = process.env.TWILIO_WHATSAPP_FROM;
@@ -302,7 +307,7 @@ function buildNotificationText(eventType, incident, actor, previousStatus, newSt
   };
 }
 
-let gmailTransporter = null;
+const gmailTransporters = new Map();
 
 // Nenhum envio pode segurar uma requisicao por mais que isto: o nginx corta em
 // 60 s, e o cidadao nao deve esperar pela entrega do e-mail para ver a
@@ -348,9 +353,9 @@ async function enviarNotificacao(eventType, incident, actor, previousStatus, new
   return { ok, email: emailResult, whatsapp: whatsappResult };
 }
 
-function getGmailTransporter() {
-  if (gmailTransporter) {
-    return gmailTransporter;
+function getGmailTransporter(porta) {
+  if (gmailTransporters.has(porta)) {
+    return gmailTransporters.get(porta);
   }
 
   if (!GMAIL_USER || !GMAIL_APP_PASSWORD) {
@@ -360,8 +365,11 @@ function getGmailTransporter() {
   // Sem estes limites o nodemailer espera ate 2 minutos por uma conexao SMTP
   // que nunca abre (provedores de nuvem costumam bloquear a porta de saida),
   // e a requisicao fica pendurada ate o nginx cortar com 504.
-  gmailTransporter = nodemailer.createTransport({
-    service: 'gmail',
+  const transporter = nodemailer.createTransport({
+    host: 'smtp.gmail.com',
+    port: porta,
+    secure: porta === 465,          // 465 = TLS direto; 587 = STARTTLS
+    requireTLS: porta !== 465,
     auth: {
       user: GMAIL_USER,
       pass: GMAIL_APP_PASSWORD
@@ -370,8 +378,15 @@ function getGmailTransporter() {
     greetingTimeout: 8000,
     socketTimeout: 15000
   });
+  gmailTransporters.set(porta, transporter);
+  return transporter;
+}
 
-  return gmailTransporter;
+// Erro de rede (porta bloqueada, sem rota), em oposicao a erro de credencial.
+function erroDeConexaoSmtp(error) {
+  const codigo = error?.code || '';
+  return ['ETIMEDOUT', 'ESOCKET', 'ECONNECTION', 'ECONNREFUSED', 'ECONNRESET', 'EDNS', 'ENOTFOUND', 'EHOSTUNREACH'].includes(codigo)
+    || /timeout/i.test(error?.message || '');
 }
 
 async function sendEmailViaGmail(toEmail, subject, text) {
@@ -379,19 +394,65 @@ async function sendEmailViaGmail(toEmail, subject, text) {
     return { sent: false, reason: 'Gmail SMTP is not configured.' };
   }
 
-  const transporter = getGmailTransporter();
-  if (!transporter) {
-    return { sent: false, reason: 'Gmail SMTP is not configured.' };
+  // Alguns provedores de nuvem bloqueiam a 465 mas nao a 587 (ou vice-versa):
+  // sem porta fixa, tenta as duas antes de desistir.
+  const portas = GMAIL_SMTP_PORT ? [GMAIL_SMTP_PORT] : [465, 587];
+  let ultimoErro = null;
+
+  for (const porta of portas) {
+    const transporter = getGmailTransporter(porta);
+    if (!transporter) break;
+    try {
+      const info = await transporter.sendMail({
+        from: GMAIL_FROM_EMAIL || GMAIL_USER,
+        to: toEmail,
+        subject,
+        text
+      });
+      return { sent: true, providerId: info?.messageId || null, porta };
+    } catch (error) {
+      ultimoErro = error;
+      if (!erroDeConexaoSmtp(error)) break;   // credencial errada: nao adianta trocar de porta
+      console.warn('[email] Gmail SMTP porta', porta, 'sem resposta:', error.code || error.message);
+    }
   }
 
-  const info = await transporter.sendMail({
-    from: GMAIL_FROM_EMAIL || GMAIL_USER,
-    to: toEmail,
-    subject,
-    text
+  const bloqueio = ultimoErro && erroDeConexaoSmtp(ultimoErro);
+  return {
+    sent: false,
+    reason: bloqueio
+      ? 'Sem conexão com smtp.gmail.com (portas ' + portas.join(' e ') + '). O servidor parece bloquear SMTP de saída; use um provedor por HTTPS (Brevo ou Resend).'
+      : (ultimoErro?.message || 'Falha ao enviar pelo Gmail.')
+  };
+}
+
+// Brevo (ex-Sendinblue): API por HTTPS na porta 443, funciona onde o SMTP e
+// bloqueado. O remetente precisa estar verificado na conta Brevo.
+async function sendEmailViaBrevo(toEmail, subject, text) {
+  if (!BREVO_API_KEY || !BREVO_FROM_EMAIL) {
+    return { sent: false, reason: 'Brevo is not configured.' };
+  }
+
+  const response = await fetchFunc('https://api.brevo.com/v3/smtp/email', {
+    method: 'POST',
+    signal: AbortSignal.timeout(TEMPO_LIMITE_ENVIO_MS),
+    headers: {
+      'Content-Type': 'application/json',
+      'api-key': BREVO_API_KEY
+    },
+    body: JSON.stringify({
+      sender: { email: BREVO_FROM_EMAIL, name: BREVO_FROM_NAME },
+      to: [{ email: toEmail }],
+      subject,
+      textContent: text
+    })
   });
 
-  return { sent: true, providerId: info?.messageId || null };
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    return { sent: false, reason: data?.message || ('Brevo respondeu ' + response.status) };
+  }
+  return { sent: true, providerId: data?.messageId || null };
 }
 
 async function sendEmailViaResend(toEmail, subject, text) {
@@ -421,23 +482,73 @@ async function sendEmailViaResend(toEmail, subject, text) {
   return { sent: true, providerId: data?.id || null };
 }
 
+// Qual provedor de e-mail esta em uso. Em `auto`, os provedores por HTTPS vem
+// antes do Gmail SMTP, porque funcionam em qualquer servidor.
+function provedorDeEmail() {
+  const canUseGmail = Boolean(GMAIL_USER && GMAIL_APP_PASSWORD);
+  const canUseResend = Boolean(RESEND_API_KEY && RESEND_FROM_EMAIL);
+  const canUseBrevo = Boolean(BREVO_API_KEY && BREVO_FROM_EMAIL);
+
+  if (EMAIL_PROVIDER === 'nenhum' || EMAIL_PROVIDER === 'none') return { nome: 'nenhum', configurado: false };
+  if (EMAIL_PROVIDER === 'gmail') return { nome: 'gmail', configurado: canUseGmail };
+  if (EMAIL_PROVIDER === 'resend') return { nome: 'resend', configurado: canUseResend };
+  if (EMAIL_PROVIDER === 'brevo') return { nome: 'brevo', configurado: canUseBrevo };
+  if (canUseBrevo) return { nome: 'brevo', configurado: true };
+  if (canUseResend) return { nome: 'resend', configurado: true };
+  if (canUseGmail) return { nome: 'gmail', configurado: true };
+  return { nome: 'nenhum', configurado: false };
+}
+
 async function sendEmailNotification(toEmail, subject, text) {
   if (!toEmail) {
     return { sent: false, reason: 'Recipient email not provided.' };
   }
 
-  const canUseGmail = Boolean(GMAIL_USER && GMAIL_APP_PASSWORD);
-  const canUseResend = Boolean(RESEND_API_KEY && RESEND_FROM_EMAIL);
+  const provedor = provedorDeEmail();
+  if (provedor.nome === 'gmail') return sendEmailViaGmail(toEmail, subject, text);
+  if (provedor.nome === 'resend') return sendEmailViaResend(toEmail, subject, text);
+  if (provedor.nome === 'brevo') return sendEmailViaBrevo(toEmail, subject, text);
 
-  if (EMAIL_PROVIDER === 'gmail' || (EMAIL_PROVIDER === 'auto' && canUseGmail)) {
-    return sendEmailViaGmail(toEmail, subject, text);
-  }
+  return { sent: false, reason: 'Nenhum provedor de e-mail configurado. Defina as credenciais do Brevo, Resend ou Gmail no .env.' };
+}
 
-  if (EMAIL_PROVIDER === 'resend' || (EMAIL_PROVIDER === 'auto' && canUseResend)) {
-    return sendEmailViaResend(toEmail, subject, text);
-  }
+// Tenta abrir uma conexao TCP: diz se a porta de saida esta liberada.
+function testarConexao(host, port, ms = 5000) {
+  return new Promise((resolve) => {
+    const inicio = Date.now();
+    const socket = net.connect({ host, port });
+    const fim = (ok, detalhe) => {
+      socket.destroy();
+      resolve({ host, port, ok, detalhe, ms: Date.now() - inicio });
+    };
+    socket.setTimeout(ms);
+    socket.once('connect', () => fim(true, 'conectou'));
+    socket.once('timeout', () => fim(false, 'sem resposta em ' + ms + ' ms (porta provavelmente bloqueada)'));
+    socket.once('error', (error) => fim(false, error.code || error.message));
+  });
+}
 
-  return { sent: false, reason: 'No email provider configured. Set Gmail or Resend credentials.' };
+// Diagnostico para o painel: provedor em uso e quais rotas de saida respondem.
+async function diagnosticoDeEmail() {
+  const provedor = provedorDeEmail();
+  const alvos = [
+    { nome: 'Gmail SMTP (TLS)', host: 'smtp.gmail.com', port: 465 },
+    { nome: 'Gmail SMTP (STARTTLS)', host: 'smtp.gmail.com', port: 587 },
+    { nome: 'Brevo API (HTTPS)', host: 'api.brevo.com', port: 443 },
+    { nome: 'Resend API (HTTPS)', host: 'api.resend.com', port: 443 }
+  ];
+  const conexoes = await Promise.all(alvos.map(async (alvo) => ({ nome: alvo.nome, ...(await testarConexao(alvo.host, alvo.port)) })));
+
+  return {
+    provedor: provedor.nome,
+    configurado: provedor.configurado,
+    modo: EMAIL_PROVIDER,
+    remetente: provedor.nome === 'gmail' ? (GMAIL_FROM_EMAIL || GMAIL_USER)
+      : provedor.nome === 'resend' ? (RESEND_FROM_EMAIL || '')
+      : provedor.nome === 'brevo' ? BREVO_FROM_EMAIL : '',
+    whatsapp: Boolean(TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN && TWILIO_WHATSAPP_FROM),
+    conexoes
+  };
 }
 
 async function sendWhatsAppNotification(toPhone, text) {
@@ -495,6 +606,30 @@ app.post('/api/auth/senha', auth.exigirAutenticacao, (req, res) => {
     return res.status(resultado.status).json({ error: resultado.erro });
   }
   return res.json(resultado);
+});
+
+// Diagnostico e teste de e-mail, para o administrador conferir a entrega sem
+// precisar de acesso ao servidor.
+app.get('/api/auth/email/diagnostico', auth.exigirAdminSistema, async (req, res) => {
+  return res.json(await diagnosticoDeEmail());
+});
+
+app.post('/api/auth/email/teste', auth.exigirAdminSistema, async (req, res) => {
+  const para = (req.body?.para || '').toString().trim();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(para)) {
+    return res.status(400).json({ error: 'Informe um e-mail de destino válido.' });
+  }
+
+  const resultado = await comTempoLimite(
+    sendEmailNotification(
+      para,
+      'SmartGov 360 — teste de envio de e-mail',
+      'Este é um e-mail de teste enviado pelo painel administrativo do SmartGov 360 em ' + new Date().toLocaleString('pt-BR') + '.'
+    ).catch((error) => ({ sent: false, reason: error.message })),
+    TEMPO_LIMITE_ENVIO_MS + 5000, 'Tempo esgotado ao enviar o e-mail de teste.'
+  );
+
+  return res.status(resultado.sent ? 200 : 207).json({ provedor: provedorDeEmail().nome, ...resultado });
 });
 
 app.get('/api/auth/usuarios', auth.exigirAdminSistema, (req, res) => {

@@ -1898,9 +1898,12 @@ if (occurrenceForm) {
       }
     }
 
-    if (locationMode === 'manual') {
+    // Nos dois modos a ocorrencia sai com logradouro, numero e cidade: a
+    // localizacao automatica nem sempre traz o numero, e ai o cidadao completa.
+    {
       const faltando = validarEnderecoManual();
       if (faltando) {
+        if (addressFields) addressFields.style.display = 'grid';
         showMessage(formMessage, faltando.mensagem, true);
         faltando.campo.focus();
         faltando.campo.scrollIntoView({ block: 'center', behavior: 'smooth' });
@@ -2661,8 +2664,10 @@ function validarEnderecoManual() {
   if (campo) campo.addEventListener('input', () => campo.classList.remove('campo-invalido'));
 });
 
+let enderecoLocalizado = false;
+
 function updateAddressMode() {
-  if (manualRadio?.checked) {
+  if (manualRadio?.checked || enderecoLocalizado) {
     if (addressFields) addressFields.style.display = 'grid';
   } else {
     if (addressFields) addressFields.style.display = 'none';
@@ -2949,16 +2954,31 @@ async function getGeolocationAddress() {
 
       if (cepInput) cepInput.value = result.cep;
       if (streetInput) streetInput.value = result.street;
-      definirSemNumero(false);
-      if (numberInput) numberInput.value = result.number;
       if (neighborhoodInput) neighborhoodInput.value = result.neighborhood;
       if (cityInput) cityInput.value = result.city;
       if (stateInput) stateInput.value = result.state;
 
+      // O numero digitado pelo cidadao prevalece sobre o da geocodificacao,
+      // que pode ser aproximado; so se preenche quando o campo esta vazio.
+      if (numberInput) {
+        const digitado = numberInput.readOnly ? numberInput.value : numberInput.value.trim();
+        if (!digitado) {
+          definirSemNumero(false);
+          numberInput.value = result.number;
+        }
+      }
+
       sessionStorage.setItem('smartgov360-last-latitude', String(latitude));
       sessionStorage.setItem('smartgov360-last-longitude', String(longitude));
 
-      showGeoMessage('Endereço preenchido pela sua localização.');
+      // Mostra o endereco localizado para conferencia, com o numero editavel.
+      enderecoLocalizado = true;
+      updateAddressMode();
+      const semNumero = numberInput && !numberInput.value.trim();
+      showGeoMessage(semNumero
+        ? 'Localização obtida. Confira o endereço e informe o número.'
+        : 'Endereço preenchido pela sua localização. Confira os dados antes de enviar.');
+      if (semNumero && numberInput) numberInput.focus();
       resolve({ ok: true, denied: false });
     }, (err) => {
       console.log('[geo] falha:', err.code, err.message);
@@ -2986,7 +3006,7 @@ async function getGeolocationAddress() {
   });
 }
 
-async function reverseGeocode(lat, lon) {
+async function reverseGeocodeNominatim(lat, lon) {
   try {
     const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lon}`;
     const resp = await fetch(url);
@@ -3005,6 +3025,54 @@ async function reverseGeocode(lat, lon) {
   } catch (error) {
     return null;
   }
+}
+
+// O geocoder do Google costuma trazer o numero do imovel (street_number),
+// que o Nominatim quase nunca tem no Brasil. Exige a API carregada na pagina.
+function reverseGeocodeGoogle(lat, lon) {
+  if (!window.google?.maps?.Geocoder) return Promise.resolve(null);
+  return new Promise((resolve) => {
+    try {
+      new google.maps.Geocoder().geocode({ location: { lat, lng: lon } }, (results, status) => {
+        if (status !== 'OK' || !results?.length) return resolve(null);
+        const temNumero = (r) => (r.address_components || []).some((c) => c.types.includes('street_number'));
+        const melhor = results.find((r) => (r.types || []).includes('street_address') && temNumero(r))
+          || results.find(temNumero)
+          || results[0];
+        const comp = (tipo, curto = false) => {
+          const c = (melhor.address_components || []).find((x) => x.types.includes(tipo));
+          return c ? (curto ? c.short_name : c.long_name) : '';
+        };
+        resolve({
+          cep: comp('postal_code'),
+          street: comp('route'),
+          number: comp('street_number'),
+          neighborhood: comp('sublocality_level_1') || comp('sublocality') || comp('neighborhood'),
+          city: comp('administrative_area_level_2') || comp('locality'),
+          state: comp('administrative_area_level_1', true)
+        });
+      });
+    } catch (error) {
+      resolve(null);
+    }
+  });
+}
+
+// Combina as duas fontes: cada campo vem da primeira que o tiver.
+async function reverseGeocode(lat, lon) {
+  const [doGoogle, doNominatim] = await Promise.all([reverseGeocodeGoogle(lat, lon), reverseGeocodeNominatim(lat, lon)]);
+  if (!doGoogle && !doNominatim) return null;
+  const principal = doGoogle || {};
+  const reserva = doNominatim || {};
+  const campo = (nome) => (principal[nome] || '').toString().trim() || (reserva[nome] || '').toString().trim();
+  return {
+    cep: campo('cep'),
+    street: campo('street'),
+    number: campo('number'),
+    neighborhood: campo('neighborhood'),
+    city: campo('city'),
+    state: campo('state')
+  };
 }
 
 if (year) {

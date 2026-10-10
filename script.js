@@ -2314,6 +2314,65 @@ async function diagnosticarEmail() {
 
 if (emailDiagnoseBtn) emailDiagnoseBtn.addEventListener('click', diagnosticarEmail);
 
+const whatsappTestForm = document.getElementById('whatsapp-test-form');
+const whatsappTestTo = document.getElementById('whatsapp-test-to');
+const whatsappMessage = document.getElementById('whatsapp-message');
+const whatsappChecks = document.getElementById('whatsapp-checks');
+
+const STATUS_WHATSAPP = {
+  queued: 'na fila do Twilio',
+  accepted: 'aceita pelo Twilio',
+  sending: 'sendo enviada',
+  sent: 'enviada ao WhatsApp (ainda sem confirmação de entrega)',
+  delivered: 'entregue no aparelho',
+  read: 'lida pelo destinatário',
+  undelivered: 'não entregue',
+  failed: 'falhou'
+};
+
+if (whatsappTestForm) {
+  whatsappTestForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    if (!ensureSystemAdminAction()) return;
+    const para = whatsappTestTo?.value?.trim() || '';
+    const botao = whatsappTestForm.querySelector('button[type="submit"]');
+    if (botao) botao.disabled = true;
+    if (whatsappChecks) whatsappChecks.innerHTML = '';
+    showMessage(whatsappMessage, 'Enviando e acompanhando o status (até 10 s)...', false);
+
+    try {
+      const resposta = await apiAutenticada('/api/auth/whatsapp/teste', {
+        method: 'POST',
+        body: JSON.stringify({ para })
+      });
+      const r = await resposta.json().catch(() => ({}));
+      if (r.error) {
+        showMessage(whatsappMessage, r.error, true);
+        return;
+      }
+
+      const statusTexto = STATUS_WHATSAPP[r.status] || r.status || 'desconhecido';
+      if (resposta.status === 200 && r.sent) {
+        showMessage(whatsappMessage, `Mensagem ${statusTexto}${r.para ? ' para ' + r.para : ''}.${['queued', 'sent', 'accepted', 'sending'].includes(r.status) ? ' Se não chegar em alguns minutos, veja os logs em Monitor > Messaging no console do Twilio.' : ''}`, false);
+      } else {
+        showMessage(whatsappMessage, `Não entregue (${statusTexto}): ${r.reason || 'motivo não informado'}`, true);
+      }
+
+      if (whatsappChecks) {
+        const itens = [];
+        if (r.remetente) itens.push(`<li class="${r.sandbox ? '' : 'ok'}"><strong>Remetente</strong><span>${escapeHtml(r.remetente)}${r.sandbox ? ' — número do sandbox do Twilio: cada destinatário precisa enviar "join <palavra-chave>" para ele antes de receber mensagens, e isso expira em 72 h.' : ''}</span></li>`);
+        if (r.sid) itens.push(`<li class="ok"><strong>Mensagem</strong><span>${escapeHtml(r.sid)}</span></li>`);
+        if (r.codigo) itens.push(`<li class="erro"><strong>Erro Twilio ${escapeHtml(String(r.codigo))}</strong><span>${escapeHtml(r.reason || '')}</span></li>`);
+        whatsappChecks.innerHTML = itens.join('');
+      }
+    } catch (error) {
+      showMessage(whatsappMessage, 'Não foi possível falar com o servidor.', true);
+    } finally {
+      if (botao) botao.disabled = false;
+    }
+  });
+}
+
 if (emailTestForm) {
   emailTestForm.addEventListener('submit', async (event) => {
     event.preventDefault();

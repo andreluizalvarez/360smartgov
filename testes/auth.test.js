@@ -69,7 +69,7 @@ async function esperarServidor() {
   }
 
   const servidor = spawn(process.execPath, ['server.js'], {
-    cwd: RAIZ, env: { ...process.env, PORT: String(PORTA), ADMIN_INITIAL_PASSWORD: 'admin123', EMAIL_PROVIDER: 'nenhum' }, stdio: ['ignore', 'pipe', 'pipe']
+    cwd: RAIZ, env: { ...process.env, PORT: String(PORTA), ADMIN_INITIAL_PASSWORD: 'admin123', EMAIL_PROVIDER: 'nenhum', TWILIO_ACCOUNT_SID: 'ACteste', TWILIO_AUTH_TOKEN: 'invalido', TWILIO_WHATSAPP_FROM: '+10000000000' }, stdio: ['ignore', 'pipe', 'pipe']
   });
   servidor.stderr.on('data', (d) => console.log('[servidor]', d.toString().trim().slice(0, 200)));
 
@@ -245,6 +245,16 @@ async function esperarServidor() {
       const teste = await pedir('POST', '/api/auth/email/teste', { para: 'alguem@example.com' }, token);
       ok(teste.status === 207 && teste.corpo.sent === false && typeof teste.corpo.reason === 'string', 'sem provedor configurado o teste responde 207 com o motivo');
       ok(teste.corpo.provedor === 'nenhum', 'informa que nenhum provedor esta configurado');
+    }
+
+    console.log('\nTeste de WhatsApp');
+    {
+      const semToken = await pedir('POST', '/api/auth/whatsapp/teste', { para: '11999999999' });
+      ok(semToken.status === 401, 'teste de WhatsApp sem token responde 401');
+      const naoConfigurado = await pedir('POST', '/api/auth/whatsapp/teste', { para: '11999999999' }, token);
+      ok(naoConfigurado.status === 207 && naoConfigurado.corpo.sent === false && ['nao_configurado', 'nao_enviado'].includes(naoConfigurado.corpo.status) && typeof naoConfigurado.corpo.reason === 'string', 'credenciais invalidas respondem 207 com o motivo');
+      const invalido = await pedir('POST', '/api/auth/whatsapp/teste', { para: '123' }, token);
+      ok(invalido.status === 400, 'telefone invalido e recusado');
     }
 
     console.log('\nRegras de cadastro e remocao');

@@ -638,10 +638,84 @@ async function sendWhatsAppNotification(toPhone, text) {
 
   const data = await response.json();
   if (!response.ok) {
-    return { sent: false, reason: data?.message || 'Failed to send WhatsApp message.' };
+    return { sent: false, reason: explicarErroTwilio(data?.code, data?.message) };
   }
 
-  return { sent: true, providerId: data?.sid || null };
+  // "sent" aqui significa aceito pelo Twilio (fila). A entrega ao aparelho e
+  // confirmada depois, no status da mensagem (ver consultarStatusWhatsApp).
+  return { sent: true, providerId: data?.sid || null, status: data?.status || 'queued', para: normalizedPhone };
+}
+
+// Erros mais comuns do WhatsApp via Twilio, traduzidos para quem configura.
+const ERROS_TWILIO = {
+  63015: 'O número de destino não entrou no sandbox do Twilio. No WhatsApp, o destinatário precisa enviar "join <palavra-chave>" para o número do sandbox antes de receber mensagens.',
+  63016: 'Fora da janela de 24 horas: no WhatsApp só é possível enviar texto livre até 24 h depois da última mensagem do destinatário. Fora disso é preciso usar um template aprovado (ou, no sandbox, o destinatário reenviar "join <palavra-chave>").',
+  63007: 'O número remetente (TWILIO_WHATSAPP_FROM) não é um canal de WhatsApp válido nesta conta Twilio.',
+  63003: 'O número de destino não tem WhatsApp.',
+  63024: 'Número de destino inválido para o WhatsApp.',
+  21211: 'Número de destino inválido.',
+  21608: 'Conta Twilio de avaliação: só envia para números verificados na conta.',
+  21610: 'O destinatário bloqueou o recebimento (respondeu STOP).',
+  20003: 'Credenciais do Twilio recusadas: confira TWILIO_ACCOUNT_SID e TWILIO_AUTH_TOKEN.'
+};
+
+function explicarErroTwilio(codigo, mensagem) {
+  const num = Number(codigo);
+  const base = mensagem || ('Erro ' + (codigo || 'desconhecido') + ' do Twilio.');
+  return ERROS_TWILIO[num] ? `${ERROS_TWILIO[num]} (Twilio ${num})` : base;
+}
+
+// Consulta o status atual de uma mensagem no Twilio (queued, sent, delivered,
+// read, undelivered, failed) e o erro, se houver.
+async function consultarStatusWhatsApp(sid) {
+  const basicToken = Buffer.from(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`).toString('base64');
+  const response = await fetchFunc(`https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages/${sid}.json`, {
+    signal: AbortSignal.timeout(TEMPO_LIMITE_ENVIO_MS),
+    headers: { Authorization: `Basic ${basicToken}` }
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) return { status: 'desconhecido', erro: data?.message || ('HTTP ' + response.status) };
+  return {
+    status: data?.status || 'desconhecido',
+    codigo: data?.error_code || null,
+    erro: data?.error_code ? explicarErroTwilio(data.error_code, data.error_message) : null
+  };
+}
+
+// Envia um WhatsApp de teste e acompanha o status por alguns segundos, para o
+// painel mostrar se a mensagem chegou ou por que nao chegou.
+async function testarWhatsApp(para) {
+  const envio = await sendWhatsAppNotification(
+    para,
+    'SmartGov 360: mensagem de teste enviada pelo painel administrativo em ' + new Date().toLocaleString('pt-BR') + '.'
+  ).catch((error) => ({ sent: false, reason: error.message }));
+
+  if (!envio.sent || !envio.providerId) {
+    return { sent: false, status: 'nao_enviado', reason: envio.reason || 'Falha ao enviar.' };
+  }
+
+  let ultimo = { status: envio.status || 'queued', codigo: null, erro: null };
+  const finais = ['delivered', 'read', 'undelivered', 'failed'];
+  for (let i = 0; i < 5 && !finais.includes(ultimo.status); i++) {
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    try {
+      ultimo = await consultarStatusWhatsApp(envio.providerId);
+    } catch (error) {
+      break;
+    }
+  }
+
+  const falhou = ['undelivered', 'failed'].includes(ultimo.status);
+  return {
+    sent: !falhou,
+    sid: envio.providerId,
+    para: envio.para,
+    status: ultimo.status,
+    codigo: ultimo.codigo,
+    reason: ultimo.erro || (falhou ? 'O Twilio não conseguiu entregar a mensagem.' : null),
+    remetente: TWILIO_WHATSAPP_FROM,
+    sandbox: TWILIO_WHATSAPP_FROM === '+14155238886'
+  };
 }
 
 app.post('/api/auth/login', (req, res) => {
@@ -689,6 +763,22 @@ app.post('/api/auth/email/teste', auth.exigirAdminSistema, async (req, res) => {
   );
 
   return res.status(resultado.sent ? 200 : 207).json({ provedor: provedorDeEmail().nome, ...resultado });
+});
+
+app.post('/api/auth/whatsapp/teste', auth.exigirAdminSistema, async (req, res) => {
+  if (!TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN || !TWILIO_WHATSAPP_FROM) {
+    return res.status(207).json({ sent: false, status: 'nao_configurado', reason: 'WhatsApp (Twilio) não configurado no .env.' });
+  }
+  const para = normalizePhoneForWhatsApp(req.body?.para);
+  if (!para) {
+    return res.status(400).json({ error: 'Informe um telefone válido com DDD, por exemplo (11) 99999-9999.' });
+  }
+  const resultado = await comTempoLimite(
+    testarWhatsApp(para),
+    TEMPO_LIMITE_ENVIO_MS + 10000,
+    'Tempo esgotado ao testar o WhatsApp.'
+  );
+  return res.status(resultado.sent ? 200 : 207).json(resultado);
 });
 
 app.get('/api/auth/usuarios', auth.exigirAdminSistema, (req, res) => {

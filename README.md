@@ -138,6 +138,17 @@ console: `smartgovIncidentes.migrarLocaisParaServidor()`.
 - Uma nova notificação é enviada quando o status da ocorrência é alterado no painel admin.
 - E-mail e WhatsApp são disparados em paralelo quando os provedores estiverem configurados.
 
+## WhatsApp: sandbox e diagnóstico
+
+A aba **Notificações** também envia um WhatsApp de teste e mostra o status
+que o Twilio informa (fila, enviada, entregue, não entregue) e o erro, quando
+há. O ponto mais comum de falha: `TWILIO_WHATSAPP_FROM=+14155238886` é o
+**sandbox** do Twilio, que só entrega para números que enviaram
+`join <palavra-chave>` ao sandbox nas últimas 72 horas. Para notificar
+qualquer cidadão é preciso um número de WhatsApp Business aprovado no Twilio
+(*Messaging > Senders > WhatsApp senders*) e, fora da janela de 24 h desde a
+última mensagem do cidadão, usar templates aprovados.
+
 ## E-mail: provedores e diagnóstico
 
 O painel administrativo tem a aba **Notificações** (administrador do sistema),

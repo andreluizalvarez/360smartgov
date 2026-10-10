@@ -281,6 +281,20 @@
               </div>
             </form>
             <div id="email-message" class="form-message" role="status" aria-live="polite"></div>
+
+            <h3 style="margin-top:1.5rem;">Envio de WhatsApp ao cidadão</h3>
+            <p class="preview-label">Envia uma mensagem de teste e mostra o status informado pelo Twilio.</p>
+            <form id="whatsapp-test-form" class="form-grid compact" autocomplete="off">
+              <div class="field">
+                <label for="whatsapp-test-to">Enviar WhatsApp de teste para</label>
+                <input id="whatsapp-test-to" type="tel" placeholder="(11) 99999-9999" required />
+              </div>
+              <div class="field full">
+                <button class="btn btn-secondary" type="submit">Enviar teste</button>
+              </div>
+            </form>
+            <div id="whatsapp-message" class="form-message" role="status" aria-live="polite"></div>
+            <ul id="whatsapp-checks" class="diag-list"></ul>
           </div>
 
           <div style="margin-top:16px; display:flex; gap:10px; flex-wrap:wrap;">

@@ -1029,6 +1029,169 @@ app.get('/api/incidentes/produtividade', auth.exigirAdminSistema, (req, res) => 
   return res.json(incidentes.produtividade(auth.listarUsuarios(), dias));
 });
 
+// ------------------------------------------------ relatorio de produtividade em PDF
+function horasLegiveis(horas) {
+  if (horas === null || horas === undefined) return '—';
+  if (horas < 1) return Math.round(horas * 60) + ' min';
+  if (horas < 48) return horas.toLocaleString('pt-BR', { maximumFractionDigits: 1 }) + ' h';
+  return (horas / 24).toLocaleString('pt-BR', { maximumFractionDigits: 1 }) + ' dias';
+}
+
+function dataHoraLegivel(iso) {
+  if (!iso) return '—';
+  const data = new Date(iso);
+  if (Number.isNaN(data.getTime())) return '—';
+  return data.toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' }) + ' ' + data.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Sao_Paulo' });
+}
+
+function gerarPdfProdutividade(dados, res) {
+  const PDFDocument = require('pdfkit');
+  const doc = new PDFDocument({ size: 'A4', margin: 40, bufferPages: true, info: { Title: 'Relatório de produtividade – SmartGov 360' } });
+  doc.pipe(res);
+
+  const VERDE = '#2e9e62';
+  const TEXTO = '#12323f';
+  const MUTED = '#4f6470';
+  const BORDA = '#d7dfe2';
+  const larguraUtil = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+  const esquerda = doc.page.margins.left;
+  const periodo = dados.dias > 0 ? `Últimos ${dados.dias} dias` : 'Todo o histórico';
+
+  // Cabecalho
+  doc.fillColor(VERDE).font('Helvetica-Bold').fontSize(10).text('SMARTGOV 360 — ' + PREFEITURA_NOME.toUpperCase(), { characterSpacing: 1 });
+  doc.moveDown(0.3);
+  doc.fillColor(TEXTO).fontSize(20).text('Relatório de produtividade');
+  doc.fillColor(MUTED).font('Helvetica').fontSize(10)
+    .text(`Administradores de categoria · ${periodo} · gerado em ${dataHoraLegivel(dados.geradoEm)}`);
+  doc.moveDown(1);
+
+  // Resumo em quatro blocos
+  const r = dados.resumo;
+  const blocos = [
+    [String(r.resolvidas), 'ocorrências concluídas'],
+    [String(r.acoes), 'ações registradas'],
+    [`${r.ativos}/${r.usuarios}`, 'usuários ativos'],
+    [horasLegiveis(r.horasMediasResolucao), 'tempo médio para concluir']
+  ];
+  const larguraBloco = (larguraUtil - 3 * 10) / 4;
+  let y = doc.y;
+  blocos.forEach(([valor, rotulo], i) => {
+    const x = esquerda + i * (larguraBloco + 10);
+    doc.roundedRect(x, y, larguraBloco, 56, 8).strokeColor(BORDA).lineWidth(1).stroke();
+    doc.fillColor(TEXTO).font('Helvetica-Bold').fontSize(18).text(valor, x + 12, y + 10, { width: larguraBloco - 24 });
+    doc.fillColor(MUTED).font('Helvetica').fontSize(8.5).text(rotulo, x + 12, y + 34, { width: larguraBloco - 24 });
+  });
+  y += 56 + 24;
+
+  // Grafico de barras: concluidas por usuario
+  const comAtividade = dados.usuarios.filter((u) => u.resolvidas > 0 || u.acoes > 0);
+  doc.fillColor(TEXTO).font('Helvetica-Bold').fontSize(12).text('Ocorrências concluídas por usuário', esquerda, y);
+  y = doc.y + 8;
+  if (!comAtividade.length) {
+    doc.fillColor(MUTED).font('Helvetica').fontSize(10).text('Nenhuma ação registrada no período.', esquerda, y);
+    y = doc.y + 16;
+  } else {
+    const margemNome = 130;
+    const larguraBarraMax = larguraUtil - margemNome - 40;
+    const maximo = Math.max(1, ...comAtividade.map((u) => u.resolvidas));
+    comAtividade.forEach((u) => {
+      if (y > doc.page.height - 120) { doc.addPage(); y = doc.page.margins.top; }
+      const w = (u.resolvidas / maximo) * larguraBarraMax;
+      doc.fillColor(TEXTO).font('Helvetica').fontSize(9.5).text(u.username, esquerda, y + 4, { width: margemNome - 10, align: 'right', ellipsis: true });
+      doc.save();
+      doc.roundedRect(esquerda + margemNome, y, Math.max(w, 2), 16, 3).fill(VERDE);
+      doc.restore();
+      doc.fillColor(MUTED).fontSize(9.5).text(String(u.resolvidas), esquerda + margemNome + Math.max(w, 2) + 6, y + 4);
+      y += 24;
+    });
+    y += 8;
+  }
+
+  // Tabela
+  const colunas = [
+    ['Usuário', 76, 'left'],
+    ['Categorias', 86, 'left'],
+    ['Concl.', 38, 'right'],
+    ['Status', 38, 'right'],
+    ['Atualiz.', 42, 'right'],
+    ['Tocadas', 42, 'right'],
+    ['Tempo médio', 58, 'right'],
+    ['Abertas', 42, 'right'],
+    ['Última atividade', 93, 'right']
+  ];
+  const alturaCabecalho = 18;
+
+  function cabecalhoTabela() {
+    doc.fillColor(MUTED).font('Helvetica-Bold').fontSize(7.5);
+    let x = esquerda;
+    colunas.forEach(([titulo, largura, alinh]) => {
+      doc.text(titulo.toUpperCase(), x, y + 4, { width: largura - 4, align: alinh });
+      x += largura;
+    });
+    y += alturaCabecalho;
+    doc.moveTo(esquerda, y).lineTo(esquerda + larguraUtil, y).strokeColor(BORDA).lineWidth(0.8).stroke();
+    y += 4;
+  }
+
+  if (y > doc.page.height - 160) { doc.addPage(); y = doc.page.margins.top; }
+  doc.fillColor(TEXTO).font('Helvetica-Bold').fontSize(12).text('Detalhamento por usuário', esquerda, y);
+  y = doc.y + 8;
+  cabecalhoTabela();
+
+  doc.font('Helvetica').fontSize(8.5);
+  if (!dados.usuarios.length) {
+    doc.fillColor(MUTED).text('Nenhum administrador de categoria cadastrado.', esquerda, y);
+  }
+  dados.usuarios.forEach((u) => {
+    const categorias = (u.categorias || []).join(', ') || '—';
+    const alturaLinha = Math.max(16, doc.heightOfString(categorias, { width: 82 }) + 6);
+    if (y + alturaLinha > doc.page.height - doc.page.margins.bottom - 20) {
+      doc.addPage(); y = doc.page.margins.top; cabecalhoTabela(); doc.font('Helvetica').fontSize(8.5);
+    }
+    const valores = [
+      u.username, categorias, String(u.resolvidas), String(u.mudancasStatus), String(u.atualizacoes),
+      String(u.ocorrenciasTocadas), horasLegiveis(u.horasMediasResolucao), String(u.abertasNaCategoria), dataHoraLegivel(u.ultimaAtividade)
+    ];
+    let x = esquerda;
+    colunas.forEach(([, largura, alinh], i) => {
+      doc.fillColor(i === 0 ? TEXTO : MUTED).font(i === 0 ? 'Helvetica-Bold' : 'Helvetica')
+        .text(valores[i], x, y + 3, { width: largura - 4, align: alinh });
+      x += largura;
+    });
+    y += alturaLinha;
+    doc.moveTo(esquerda, y).lineTo(esquerda + larguraUtil, y).strokeColor('#eef1f2').lineWidth(0.5).stroke();
+    y += 2;
+  });
+
+  // Rodape com numeracao
+  const paginas = doc.bufferedPageRange();
+  for (let i = 0; i < paginas.count; i++) {
+    doc.switchToPage(i);
+    const margemInferior = doc.page.margins.bottom;
+    doc.page.margins.bottom = 0;   // o rodape fica na margem; sem isto o pdfkit abriria outra pagina
+    doc.fillColor(MUTED).font('Helvetica').fontSize(8)
+      .text(`SmartGov 360 · Relatório de produtividade · página ${i + 1} de ${paginas.count}`,
+        esquerda, doc.page.height - margemInferior + 12, { width: larguraUtil, align: 'center', lineBreak: false });
+    doc.page.margins.bottom = margemInferior;
+  }
+  doc.end();
+}
+
+app.get('/api/incidentes/produtividade/pdf', auth.exigirAdminSistema, (req, res) => {
+  const dias = Math.max(0, Math.min(365, Number(req.query.dias ?? 30) || 0));
+  const dados = incidentes.produtividade(auth.listarUsuarios(), dias);
+  const carimbo = new Date().toISOString().slice(0, 10);
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `attachment; filename="produtividade-${dias > 0 ? dias + 'dias' : 'historico'}-${carimbo}.pdf"`);
+  try {
+    gerarPdfProdutividade(dados, res);
+  } catch (error) {
+    console.error('[pdf] falha ao gerar o relatorio:', error);
+    if (!res.headersSent) res.status(500).json({ error: 'Não foi possível gerar o PDF.' });
+    else res.end();
+  }
+});
+
 app.delete('/api/incidentes', auth.exigirAdminSistema, (req, res) => {
   return res.json(incidentes.limpar());
 });

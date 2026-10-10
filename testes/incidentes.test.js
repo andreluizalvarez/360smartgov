@@ -52,6 +52,20 @@ function pedir(metodo, caminho, corpo, token) {
   });
 }
 
+// Como pedir(), mas devolve o corpo bruto (para arquivos binarios).
+function pedirBruto(metodo, caminho, token) {
+  return new Promise((resolve, reject) => {
+    const headers = token ? { Authorization: 'Bearer ' + token } : {};
+    const req = http.request({ host: '127.0.0.1', port: PORTA, path: caminho, method: metodo, headers }, (res) => {
+      const partes = [];
+      res.on('data', (parte) => partes.push(parte));
+      res.on('end', () => resolve({ status: res.statusCode, tipo: res.headers['content-type'] || '', disposicao: res.headers['content-disposition'] || '', corpo: Buffer.concat(partes) }));
+    });
+    req.on('error', reject);
+    req.end();
+  });
+}
+
 async function esperarServidor() {
   for (let i = 0; i < 60; i++) {
     try {
@@ -215,6 +229,13 @@ async function esperarServidor() {
       ok(typeof linha.horasMediasResolucao === 'number' && linha.horasMediasResolucao >= 0, 'calcula o tempo medio de resolucao');
       ok(prod.corpo.resumo.resolvidas === 1 && prod.corpo.resumo.ativos === 1, 'resumo agrega os usuarios');
       ok(!prod.corpo.usuarios.some((u) => u.username === 'admin'), 'o admin do sistema nao entra na medicao');
+
+      const pdfSemToken = await pedir('GET', '/api/incidentes/produtividade/pdf');
+      ok(pdfSemToken.status === 401, 'PDF sem token responde 401');
+      const pdf = await pedirBruto('GET', '/api/incidentes/produtividade/pdf?dias=30', token);
+      ok(pdf.status === 200 && /application\/pdf/.test(pdf.tipo) && pdf.corpo.slice(0, 4).toString() === '%PDF', 'PDF do relatorio e gerado');
+      ok(/produtividade-30dias-/.test(pdf.disposicao), 'nome do arquivo traz o periodo');
+      ok(pdf.corpo.length > 2000, 'o PDF tem conteudo');
 
       const antigo = await pedir('GET', '/api/incidentes/produtividade?dias=0', null, token);
       ok(antigo.corpo.usuarios.find((u) => u.username === 'operador').resolvidas === 1, 'dias=0 considera todo o historico');

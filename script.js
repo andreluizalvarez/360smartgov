@@ -2245,6 +2245,41 @@ async function carregarProdutividade() {
 
 if (prodPeriod) prodPeriod.addEventListener('change', carregarProdutividade);
 
+// Baixa o relatorio em PDF gerado no servidor para o periodo selecionado.
+const prodExportBtn = document.getElementById('prod-export-pdf');
+if (prodExportBtn) {
+  prodExportBtn.addEventListener('click', async () => {
+    if (!ensureSystemAdminAction()) return;
+    const dias = prodPeriod ? prodPeriod.value : '30';
+    prodExportBtn.disabled = true;
+    showMessage(prodMessage, 'Gerando o PDF...', false);
+    try {
+      const resposta = await apiAutenticada(`/api/incidentes/produtividade/pdf?dias=${encodeURIComponent(dias)}`);
+      if (!resposta.ok) {
+        const corpo = await resposta.json().catch(() => ({}));
+        showMessage(prodMessage, corpo.error || 'Não foi possível gerar o PDF.', true);
+        return;
+      }
+      const blob = await resposta.blob();
+      const nome = (resposta.headers.get('Content-Disposition') || '').match(/filename="([^"]+)"/)?.[1]
+        || `produtividade-${new Date().toISOString().slice(0, 10)}.pdf`;
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = nome;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+      showMessage(prodMessage, `PDF gerado: ${nome}`, false);
+    } catch (error) {
+      showMessage(prodMessage, 'Não foi possível falar com o servidor.', true);
+    } finally {
+      prodExportBtn.disabled = false;
+    }
+  });
+}
+
 // ---------- Notificacoes: diagnostico e teste de e-mail ----------
 const emailStatus = document.getElementById('email-status');
 const emailChecks = document.getElementById('email-checks');

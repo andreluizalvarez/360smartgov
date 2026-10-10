@@ -258,13 +258,29 @@ function formatDateLabel(value) {
   }).format(date);
 }
 
+// Nome da prefeitura nas mensagens ao cidadao (ajustavel pelo .env).
+const PREFEITURA_NOME = (process.env.PREFEITURA_NOME || 'Prefeitura Municipal de Ourinhos').trim();
+const ASSINATURA_EMAIL = [PREFEITURA_NOME, 'Atendimento ao Cidadão – SmartGov 360'];
+
+// "Rua Pará, Centro, Ourinhos – SP": logradouro, bairro, cidade – UF.
+function localDaOcorrencia(incident) {
+  const cidadeUf = [incident?.city, incident?.state].filter(Boolean).join(' – ');
+  const partes = [incident?.street, incident?.neighborhood, cidadeUf].filter(Boolean);
+  if (partes.length) return partes.join(', ');
+  return incident?.address || 'Não informado';
+}
+
+function primeiroNome(nome) {
+  const limpo = (nome || '').toString().trim();
+  return limpo ? limpo.split(/\s+/)[0] : 'Cidadão';
+}
+
 function buildNotificationText(eventType, incident, actor, previousStatus, newStatus) {
   const title = incident?.title || 'Ocorrência';
   const category = incident?.category || 'Não informada';
   const status = incident?.status || newStatus || 'Não informado';
   const address = incident?.address || [incident?.street, incident?.number, incident?.neighborhood, incident?.city, incident?.state].filter(Boolean).join(', ') || 'Não informado';
-  const citizenName = incident?.name || 'Cidadão';
-  const createdAt = formatDateLabel(incident?.createdAt);
+  const citizenName = primeiroNome(incident?.name);
 
   if (eventType === 'status_changed') {
     const fromStatus = previousStatus || 'Não informado';
@@ -289,21 +305,29 @@ function buildNotificationText(eventType, incident, actor, previousStatus, newSt
     };
   }
 
+  const local = localDaOcorrencia(incident);
   return {
-    subject: 'SmartGov 360: ocorrência registrada com sucesso',
+    subject: 'Recebemos sua solicitação – SmartGov 360',
     emailText: [
       `Olá, ${citizenName}!`,
       '',
-      `Recebemos sua ocorrência "${title}" com sucesso.`,
-      `Categoria: ${category}`,
-      `Prioridade: ${incident?.priority || 'Não informada'}`,
-      `Status inicial: ${status}`,
-      `Endereço: ${address}`,
-      `Data de abertura: ${createdAt}`,
+      'Sua solicitação foi recebida com sucesso pela Prefeitura.',
       '',
-      'Mensagem automática do SmartGov 360.'
+      `Solicitação: ${title}`,
+      '',
+      `Categoria: ${category}`,
+      '',
+      `Local: ${local}`,
+      '',
+      `Status: ${status}`,
+      '',
+      'A solicitação será encaminhada ao setor responsável para análise.',
+      '',
+      'Você será informado sempre que houver uma atualização.',
+      '',
+      ...ASSINATURA_EMAIL
     ].join('\n'),
-    whatsappText: `SmartGov 360: ocorrência "${title}" aberta com sucesso. Status inicial: ${status}. Categoria: ${category}.`
+    whatsappText: `Olá, ${citizenName}! Sua solicitação "${title}" foi recebida com sucesso pela Prefeitura. Categoria: ${category}. Local: ${local}. Status: ${status}. Você será informado sempre que houver uma atualização. ${PREFEITURA_NOME} – SmartGov 360.`
   };
 }
 

@@ -283,25 +283,55 @@ function buildNotificationText(eventType, incident, actor, previousStatus, newSt
   const citizenName = primeiroNome(incident?.name);
 
   if (eventType === 'status_changed') {
-    const fromStatus = previousStatus || 'Não informado';
     const toStatus = newStatus || status;
-    const by = actor || 'equipe administrativa';
+    const local = localDaOcorrencia(incident);
+    const chave = (toStatus || '').toString().trim().toLowerCase();
+
+    // Assunto e paragrafos finais variam com o status; o corpo e o mesmo.
+    const modelos = {
+      'em andamento': {
+        subject: 'Sua solicitação está em andamento – SmartGov 360',
+        abertura: 'Temos uma atualização sobre sua solicitação:',
+        fechamento: [
+          'Sua solicitação já foi encaminhada ao setor responsável e as providências necessárias estão sendo analisadas ou executadas.',
+          '',
+          'Você será informado quando o atendimento for concluído.'
+        ]
+      },
+      'concluído': {
+        subject: 'Sua solicitação foi concluída – SmartGov 360',
+        abertura: 'Temos uma atualização sobre sua solicitação:',
+        fechamento: [
+          'O atendimento da sua solicitação foi concluído pelo setor responsável.',
+          '',
+          'Agradecemos a sua colaboração com a cidade.'
+        ]
+      }
+    };
+    const modelo = modelos[chave] || {
+      subject: `Sua solicitação foi atualizada – SmartGov 360`,
+      abertura: 'Temos uma atualização sobre sua solicitação:',
+      fechamento: ['Você será informado sempre que houver uma nova atualização.']
+    };
 
     return {
-      subject: `SmartGov 360: status atualizado para "${toStatus}"`,
+      subject: modelo.subject,
       emailText: [
         `Olá, ${citizenName}!`,
         '',
-        `Sua ocorrência "${title}" teve atualização de status.`,
-        `Status anterior: ${fromStatus}`,
-        `Novo status: ${toStatus}`,
-        `Categoria: ${category}`,
-        `Endereço: ${address}`,
-        `Atualizado por: ${by}`,
+        modelo.abertura,
         '',
-        'Mensagem automática do SmartGov 360.'
+        `Solicitação: ${title}`,
+        '',
+        `Local: ${local}`,
+        '',
+        `Status: ${toStatus}`,
+        '',
+        ...modelo.fechamento,
+        '',
+        ...ASSINATURA_EMAIL
       ].join('\n'),
-      whatsappText: `SmartGov 360: sua ocorrência "${title}" mudou de status (${fromStatus} -> ${toStatus}). Categoria: ${category}. Atualizado por: ${by}.`
+      whatsappText: `Olá, ${citizenName}! ${modelo.abertura} "${title}" – Local: ${local}. Status: ${toStatus}. ${modelo.fechamento.filter(Boolean).join(' ')} ${PREFEITURA_NOME} – SmartGov 360.`
     };
   }
 

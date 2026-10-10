@@ -1248,6 +1248,35 @@ app.post('/api/notify-user', async (req, res) => {
   return res.status(resultado.ok ? 200 : 207).json(resultado);
 });
 
+// Em producao (sob o pm2), cria os templates de WhatsApp e pede a aprovacao
+// da Meta sozinho na primeira subida com o Twilio configurado. Fora do pm2
+// (maquina de desenvolvimento, testes) nada e criado, para nao duplicar
+// templates na conta.
+async function provisionarTemplatesNaSubida() {
+  const sobPm2 = process.env.pm_id !== undefined;
+  const credenciaisReais = /^AC[0-9a-f]{32}$/i.test(TWILIO_ACCOUNT_SID || '') && Boolean(TWILIO_AUTH_TOKEN && TWILIO_WHATSAPP_FROM);
+  if (!sobPm2 || !credenciaisReais) return;
+
+  const salvos = lerTemplates();
+  const definicoes = definicoesDeTemplates();
+  const faltando = Object.keys(definicoes).filter((chave) => !salvos[chave]?.sid);
+  if (!faltando.length) return;
+
+  console.log('[whatsapp] Criando templates e pedindo aprovação:', faltando.join(', '));
+  for (const chave of faltando) {
+    try {
+      salvos[chave] = await criarTemplateNoTwilio(chave, definicoes[chave]);
+      console.log('[whatsapp] Template', chave, 'criado:', salvos[chave].nome, '(' + salvos[chave].status + ')');
+    } catch (error) {
+      console.warn('[whatsapp] Falha ao criar o template', chave + ':', error.message);
+    }
+  }
+  salvarTemplates(salvos);
+}
+
 app.listen(PORT, () => {
   console.log(`Server listening on port ${PORT}`);
+  setTimeout(() => {
+    provisionarTemplatesNaSubida().catch((error) => console.warn('[whatsapp] provisionamento falhou:', error.message));
+  }, 10000);
 });

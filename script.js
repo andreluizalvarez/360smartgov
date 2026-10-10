@@ -1272,9 +1272,9 @@ function renderStats(incidents) {
   }
 
   totalCount.textContent = incidents.length;
-  pendingCount.textContent = incidents.filter((item) => item.status === 'Em análise').length;
+  pendingCount.textContent = incidents.filter((item) => item.status === 'Recebido').length;
   progressCount.textContent = incidents.filter((item) => item.status === 'Em andamento').length;
-  resolvedCount.textContent = incidents.filter((item) => item.status === 'Resolvido').length;
+  resolvedCount.textContent = incidents.filter((item) => item.status === 'Concluído').length;
 }
 
 function escapeHtml(value) {
@@ -1347,9 +1347,9 @@ function renderIncidents(incidents) {
         </td>
         <td>
           <select class="status-select" data-id="${item.id}">
-            <option value="Em análise" ${item.status === 'Em análise' ? 'selected' : ''}>Em análise</option>
+            <option value="Recebido" ${item.status === 'Recebido' ? 'selected' : ''}>Recebido</option>
             <option value="Em andamento" ${item.status === 'Em andamento' ? 'selected' : ''}>Em andamento</option>
-            <option value="Resolvido" ${item.status === 'Resolvido' ? 'selected' : ''}>Resolvido</option>
+            <option value="Concluído" ${item.status === 'Concluído' ? 'selected' : ''}>Concluído</option>
           </select>
         </td>
       </tr>
@@ -2000,7 +2000,7 @@ if (occurrenceForm) {
         // anterior: o painel localiza o ponto pelo proprio endereco, com numero.
         latitude: locationMode === 'manual' ? '' : sessionStorage.getItem('smartgov360-last-latitude') || '',
         longitude: locationMode === 'manual' ? '' : sessionStorage.getItem('smartgov360-last-longitude') || '',
-        status: 'Em análise',
+        status: 'Recebido',
         createdAt: new Date().toISOString()
       };
 

@@ -113,7 +113,7 @@ async function esperarServidor() {
       });
       ok(r1.status === 201, 'POST /api/incidentes grava sem token');
       buraco = r1.corpo.incidente;
-      ok(buraco.id !== 'forjado' && buraco.status === 'Em análise', 'id e status iniciais sao definidos pelo servidor');
+      ok(buraco.id !== 'forjado' && buraco.status === 'Recebido', 'id e status iniciais sao definidos pelo servidor');
       ok(buraco.photoDataUrl.startsWith('data:image/jpeg'), 'a foto e guardada');
 
       const r2 = await pedir('POST', '/api/incidentes', {
@@ -156,7 +156,7 @@ async function esperarServidor() {
       const lista = await pedir('GET', '/api/incidentes', null, tokenOperador);
       ok(lista.corpo.incidentes.length === 1 && lista.corpo.incidentes[0].id === buraco.id, 'lista filtrada pela categoria (sem diferenciar acento e caixa)');
 
-      const outra = await pedir('PUT', '/api/incidentes/' + poste.id, { status: 'Concluída' }, tokenOperador);
+      const outra = await pedir('PUT', '/api/incidentes/' + poste.id, { status: 'Concluído' }, tokenOperador);
       ok(outra.status === 403, 'alterar ocorrencia de outra categoria responde 403');
 
       const mover = await pedir('PUT', '/api/incidentes/' + buraco.id, { category: 'Iluminação pública' }, tokenOperador);
@@ -188,14 +188,23 @@ async function esperarServidor() {
 
       const agora = new Date().toISOString();
       const resolver = await pedir('PUT', '/api/incidentes/' + buraco.id, {
-        status: 'Resolvido',
+        status: 'Concluído',
         history: [
-          { id: 'h1', type: 'status', text: 'Status alterado de Em análise para Em andamento', by: 'operador', at: agora },
+          { id: 'h1', type: 'status', text: 'Status alterado de Recebido para Em andamento', by: 'operador', at: agora },
           { id: 'h2', type: 'work', text: 'Equipe no local', by: 'operador', at: agora },
-          { id: 'h3', type: 'status', text: 'Status alterado de Em andamento para Resolvido', by: 'operador', at: agora }
+          { id: 'h3', type: 'status', text: 'Status alterado de Em andamento para Concluído', by: 'operador', at: agora }
         ]
       }, tokenOperador);
-      ok(resolver.status === 200, 'operador resolve a ocorrencia com historico');
+      ok(resolver.status === 200, 'operador conclui a ocorrencia com historico');
+
+      const invalido = await pedir('PUT', '/api/incidentes/' + buraco.id, { status: 'Qualquer coisa' }, token);
+      ok(invalido.status === 400, 'status fora da lista e recusado');
+
+      const antigoNome = await pedir('PUT', '/api/incidentes/' + buraco.id, { status: 'Resolvido' }, token);
+      ok(antigoNome.status === 200 && antigoNome.corpo.incidente.status === 'Concluído', 'nome antigo "Resolvido" vira "Concluído"');
+      const antigoInicial = await pedir('PUT', '/api/incidentes/' + buraco.id, { status: 'Em análise' }, token);
+      ok(antigoInicial.corpo.incidente.status === 'Recebido', 'nome antigo "Em análise" vira "Recebido"');
+      await pedir('PUT', '/api/incidentes/' + buraco.id, { status: 'Concluído' }, token);
 
       const prod = await pedir('GET', '/api/incidentes/produtividade?dias=30', null, token);
       ok(prod.status === 200, 'admin do sistema consulta a produtividade');

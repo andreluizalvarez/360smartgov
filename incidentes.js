@@ -9,7 +9,21 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 
-const STATUS_INICIAL = 'Em análise';
+const STATUS_INICIAL = 'Recebido';
+const STATUS_FINAL = 'Concluído';
+const STATUS_VALIDOS = [STATUS_INICIAL, 'Em andamento', STATUS_FINAL];
+
+// Nomes antigos gravados antes da troca: continuam legiveis sem migrar o
+// arquivo a mao.
+const STATUS_ANTIGOS = { 'em análise': STATUS_INICIAL, 'em analise': STATUS_INICIAL, 'resolvido': STATUS_FINAL };
+
+function normalizarStatus(valor) {
+  const bruto = (valor === undefined || valor === null ? '' : valor).toString().trim();
+  const antigo = STATUS_ANTIGOS[bruto.toLowerCase()];
+  if (antigo) return antigo;
+  const conhecido = STATUS_VALIDOS.find((item) => item.toLowerCase() === bruto.toLowerCase());
+  return conhecido || bruto;
+}
 const LIMITE_FOTO_CHARS = 2 * 1024 * 1024;   // data URL em base64 (~1,5 MB de imagem)
 const LIMITE_TEXTO = 4000;
 const LIMITE_CAMPO = 300;
@@ -37,7 +51,8 @@ function criarIncidentes({ diretorioDados, papelAdminSistema }) {
   function ler() {
     try {
       const lista = JSON.parse(fs.readFileSync(ARQUIVO, 'utf8'));
-      return Array.isArray(lista) ? lista : [];
+      if (!Array.isArray(lista)) return [];
+      return lista.map((item) => (item && typeof item === 'object' ? { ...item, status: normalizarStatus(item.status) || STATUS_INICIAL } : item));
     } catch (error) {
       return [];
     }
@@ -131,7 +146,12 @@ function criarIncidentes({ diretorioDados, papelAdminSistema }) {
       delete mudancas.history;
     }
     if (mudancas.workUpdate !== undefined) mudancas.workUpdate = texto(mudancas.workUpdate, LIMITE_TEXTO);
-    if (mudancas.status !== undefined) mudancas.status = texto(mudancas.status);
+    if (mudancas.status !== undefined) {
+      mudancas.status = normalizarStatus(texto(mudancas.status));
+      if (!STATUS_VALIDOS.includes(mudancas.status)) {
+        return { erro: 'Status inválido. Use: ' + STATUS_VALIDOS.join(', ') + '.', status: 400 };
+      }
+    }
 
     // Um admin de categoria nao pode mover a ocorrencia para fora do que enxerga.
     if (mudancas.category !== undefined) {
@@ -199,7 +219,7 @@ function criarIncidentes({ diretorioDados, papelAdminSistema }) {
             atualizacoes += 1;
           } else if (entrada.type === 'status') {
             mudancasStatus += 1;
-            if (/para Resolvido$/i.test(entrada.text || '')) {
+            if (/para (Resolvido|Concluído|Concluido)$/i.test(entrada.text || '')) {
               resolvidas += 1;
               const abertura = Date.parse(item.createdAt || '');
               const fechamento = Date.parse(entrada.at || '');
@@ -216,7 +236,7 @@ function criarIncidentes({ diretorioDados, papelAdminSistema }) {
         username: usuario.username,
         categorias: usuario.allowedCategories || [],
         naCategoria: daCategoria.length,
-        abertasNaCategoria: daCategoria.filter((item) => item.status !== 'Resolvido').length,
+        abertasNaCategoria: daCategoria.filter((item) => item.status !== STATUS_FINAL).length,
         novasNoPeriodo: daCategoria.filter((item) => noPeriodo(item.createdAt)).length,
         ocorrenciasTocadas: ocorrenciasTocadas.size,
         mudancasStatus,
@@ -251,7 +271,7 @@ function criarIncidentes({ diretorioDados, papelAdminSistema }) {
     };
   }
 
-  return { listar, criar, atualizar, remover, limpar, produtividade, CAMPOS_EDITAVEIS };
+  return { listar, criar, atualizar, remover, limpar, produtividade, CAMPOS_EDITAVEIS, STATUS_VALIDOS };
 }
 
-module.exports = { criarIncidentes, STATUS_INICIAL };
+module.exports = { criarIncidentes, STATUS_INICIAL, STATUS_FINAL, STATUS_VALIDOS, normalizarStatus };

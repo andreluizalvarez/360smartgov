@@ -2330,6 +2330,89 @@ const STATUS_WHATSAPP = {
   failed: 'falhou'
 };
 
+const whatsappTemplatesStatus = document.getElementById('whatsapp-templates-status');
+const whatsappTemplatesList = document.getElementById('whatsapp-templates');
+const whatsappTemplatesRefresh = document.getElementById('whatsapp-templates-refresh');
+const whatsappTemplatesCreate = document.getElementById('whatsapp-templates-create');
+
+const STATUS_TEMPLATE = {
+  nao_criado: ['ainda não criado', ''],
+  pending: ['aguardando aprovação da Meta', ''],
+  received: ['recebido pela Meta, em análise', ''],
+  submitted: ['enviado para aprovação', ''],
+  approved: ['aprovado', 'ok'],
+  rejected: ['rejeitado', 'erro'],
+  paused: ['pausado pela Meta', 'erro'],
+  disabled: ['desativado pela Meta', 'erro'],
+  desconhecido: ['status desconhecido', 'erro']
+};
+
+function renderTemplatesWhatsApp(dados) {
+  const lista = dados.templates || [];
+  if (whatsappTemplatesList) {
+    whatsappTemplatesList.innerHTML = lista.map((t) => {
+      const [texto, classe] = STATUS_TEMPLATE[t.status] || STATUS_TEMPLATE.desconhecido;
+      return `<li class="${classe}"><strong>${escapeHtml(t.titulo)}</strong><span>${texto}${t.nome ? ' — ' + escapeHtml(t.nome) : ''}${t.motivo ? ' — ' + escapeHtml(t.motivo) : ''}</span></li>`;
+    }).join('');
+  }
+  if (whatsappTemplatesStatus) {
+    const aprovados = lista.filter((t) => t.status === 'approved').length;
+    if (!dados.configurado) {
+      whatsappTemplatesStatus.className = 'email-status erro';
+      whatsappTemplatesStatus.textContent = 'WhatsApp (Twilio) não configurado no servidor.';
+    } else if (aprovados === lista.length && lista.length) {
+      whatsappTemplatesStatus.className = 'email-status ok';
+      whatsappTemplatesStatus.textContent = 'Os três templates estão aprovados: as notificações ao cidadão vão por template e chegam mesmo sem conversa aberta.';
+    } else if (lista.every((t) => t.status === 'nao_criado')) {
+      whatsappTemplatesStatus.className = 'email-status erro';
+      whatsappTemplatesStatus.textContent = 'Sem templates aprovados, a prefeitura não consegue iniciar uma conversa no WhatsApp: só pode responder em até 24 h a quem escreveu primeiro. Clique em "Criar templates e pedir aprovação".';
+    } else {
+      whatsappTemplatesStatus.className = 'email-status';
+      whatsappTemplatesStatus.textContent = `${aprovados} de ${lista.length} templates aprovados. A Meta costuma responder em minutos, às vezes em até 24 h. Clique em "Atualizar" para consultar.`;
+    }
+  }
+}
+
+async function carregarTemplatesWhatsApp(consultar = true) {
+  if (!ensureSystemAdminAction()) return;
+  if (whatsappTemplatesRefresh) whatsappTemplatesRefresh.disabled = true;
+  try {
+    const resposta = await apiAutenticada(`/api/auth/whatsapp/templates?consultar=${consultar ? '1' : '0'}`);
+    const dados = await resposta.json().catch(() => ({}));
+    if (resposta.ok) renderTemplatesWhatsApp(dados);
+  } catch (error) {
+    if (whatsappTemplatesStatus) whatsappTemplatesStatus.textContent = 'Não foi possível falar com o servidor.';
+  } finally {
+    if (whatsappTemplatesRefresh) whatsappTemplatesRefresh.disabled = false;
+  }
+}
+
+if (whatsappTemplatesRefresh) whatsappTemplatesRefresh.addEventListener('click', () => carregarTemplatesWhatsApp(true));
+
+if (whatsappTemplatesCreate) {
+  whatsappTemplatesCreate.addEventListener('click', async () => {
+    if (!ensureSystemAdminAction()) return;
+    whatsappTemplatesCreate.disabled = true;
+    if (whatsappTemplatesStatus) {
+      whatsappTemplatesStatus.className = 'email-status';
+      whatsappTemplatesStatus.textContent = 'Criando os templates no Twilio e pedindo a aprovação da Meta...';
+    }
+    try {
+      const resposta = await apiAutenticada('/api/auth/whatsapp/templates/criar', { method: 'POST', body: JSON.stringify({}) });
+      const dados = await resposta.json().catch(() => ({}));
+      if (dados.templates) renderTemplatesWhatsApp({ templates: dados.templates, configurado: true });
+      if (!dados.ok && whatsappTemplatesStatus) {
+        whatsappTemplatesStatus.className = 'email-status erro';
+        whatsappTemplatesStatus.textContent = dados.reason || 'Não foi possível criar os templates.';
+      }
+    } catch (error) {
+      if (whatsappTemplatesStatus) whatsappTemplatesStatus.textContent = 'Não foi possível falar com o servidor.';
+    } finally {
+      whatsappTemplatesCreate.disabled = false;
+    }
+  });
+}
+
 if (whatsappTestForm) {
   whatsappTestForm.addEventListener('submit', async (event) => {
     event.preventDefault();
@@ -2353,7 +2436,7 @@ if (whatsappTestForm) {
 
       const statusTexto = STATUS_WHATSAPP[r.status] || r.status || 'desconhecido';
       if (resposta.status === 200 && r.sent) {
-        showMessage(whatsappMessage, `Mensagem ${statusTexto}${r.para ? ' para ' + r.para : ''}.${['queued', 'sent', 'accepted', 'sending'].includes(r.status) ? ' Se não chegar em alguns minutos, veja os logs em Monitor > Messaging no console do Twilio.' : ''}`, false);
+        showMessage(whatsappMessage, `Mensagem ${statusTexto}${r.para ? ' para ' + r.para : ''}${r.usouTemplate ? ', enviada por template aprovado' : ', enviada como texto livre (só chega se o destinatário escreveu nas últimas 24 h)'}.${['queued', 'sent', 'accepted', 'sending'].includes(r.status) ? ' Se não chegar em alguns minutos, veja os logs em Monitor > Messaging no console do Twilio.' : ''}`, false);
       } else {
         showMessage(whatsappMessage, `Não entregue (${statusTexto}): ${r.reason || 'motivo não informado'}`, true);
       }
@@ -2591,6 +2674,7 @@ function switchTab(tab) {
   if (tab === 'notifications') {
     tabNotifications.classList.add('active');
     panelNotifications.classList.remove('hidden');
+    carregarTemplatesWhatsApp(false);
   }
   if (tab === 'productivity') {
     tabProductivity.classList.add('active');

@@ -146,8 +146,12 @@ há. O ponto mais comum de falha: `TWILIO_WHATSAPP_FROM=+14155238886` é o
 **sandbox** do Twilio, que só entrega para números que enviaram
 `join <palavra-chave>` ao sandbox nas últimas 72 horas. Para notificar
 qualquer cidadão é preciso um número de WhatsApp Business aprovado no Twilio
-(*Messaging > Senders > WhatsApp senders*) e, fora da janela de 24 h desde a
-última mensagem do cidadão, usar templates aprovados.
+(*Messaging > Senders > WhatsApp senders*). Com número próprio, a prefeitura
+só consegue **iniciar** uma conversa usando templates aprovados pela Meta: na
+aba Notificações, clique em "Criar templates e pedir aprovação" (um para cada
+status: recebida, em andamento, concluída). Os SIDs ficam em
+`dados/whatsapp-templates.json`; aprovados, as notificações passam a usá-los
+automaticamente.
 
 ## E-mail: provedores e diagnóstico
 

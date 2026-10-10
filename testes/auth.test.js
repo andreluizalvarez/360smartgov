@@ -255,6 +255,13 @@ async function esperarServidor() {
       ok(naoConfigurado.status === 207 && naoConfigurado.corpo.sent === false && ['nao_configurado', 'nao_enviado'].includes(naoConfigurado.corpo.status) && typeof naoConfigurado.corpo.reason === 'string', 'credenciais invalidas respondem 207 com o motivo');
       const invalido = await pedir('POST', '/api/auth/whatsapp/teste', { para: '123' }, token);
       ok(invalido.status === 400, 'telefone invalido e recusado');
+
+      const semTokenTpl = await pedir('GET', '/api/auth/whatsapp/templates');
+      ok(semTokenTpl.status === 401, 'templates sem token responde 401');
+      const tpl = await pedir('GET', '/api/auth/whatsapp/templates?consultar=0', null, token);
+      ok(tpl.status === 200 && tpl.corpo.templates.length === 3 && tpl.corpo.templates.every((t) => t.status === 'nao_criado'), 'lista os 3 templates ainda nao criados');
+      const criar = await pedir('POST', '/api/auth/whatsapp/templates/criar', {}, token);
+      ok(criar.status === 207 && criar.corpo.ok === false && typeof criar.corpo.reason === 'string', 'com credenciais invalidas a criacao devolve o motivo');
     }
 
     console.log('\nRegras de cadastro e remocao');

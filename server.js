@@ -319,7 +319,13 @@ function buildNotificationText(eventType, incident, actor, previousStatus, newSt
       fechamento: ['Você será informado sempre que houver uma nova atualização.']
     };
 
+    const chaveTemplate = chave === 'em andamento' ? 'andamento' : (chave === 'concluído' ? 'concluido' : null);
+    const variaveis = chaveTemplate === 'concluido'
+      ? { 1: citizenName, 2: title, 3: local, 4: respostaDaPrefeitura }
+      : { 1: citizenName, 2: title, 3: local };
+
     return {
+      template: chaveTemplate ? { chave: chaveTemplate, variaveis } : null,
       subject: modelo.subject,
       emailText: [
         `Olá, ${citizenName}!`,
@@ -342,6 +348,7 @@ function buildNotificationText(eventType, incident, actor, previousStatus, newSt
 
   const local = localDaOcorrencia(incident);
   return {
+    template: { chave: 'recebido', variaveis: { 1: citizenName, 2: title, 3: category, 4: local } },
     subject: 'Recebemos sua solicitação – SmartGov 360',
     emailText: [
       `Olá, ${citizenName}!`,
@@ -399,7 +406,7 @@ async function enviarNotificacao(eventType, incident, actor, previousStatus, new
       TEMPO_LIMITE_ENVIO_MS, 'Tempo esgotado ao enviar o e-mail.'
     ),
     comTempoLimite(
-      sendWhatsAppNotification(recipientPhone, composed.whatsappText)
+      sendWhatsAppNotification(recipientPhone, composed.whatsappText, composed.template)
         .catch((error) => ({ sent: false, reason: error.message })),
       TEMPO_LIMITE_ENVIO_MS, 'Tempo esgotado ao enviar o WhatsApp.'
     )
@@ -610,7 +617,133 @@ async function diagnosticoDeEmail() {
   };
 }
 
-async function sendWhatsAppNotification(toPhone, text) {
+// ---------------------------------------------------- templates do WhatsApp
+//
+// Fora do sandbox, o WhatsApp so aceita texto livre nas 24 h seguintes a uma
+// mensagem do cidadao. Como a prefeitura e quem inicia a conversa, cada
+// notificacao precisa de um template aprovado pela Meta. Os templates sao
+// criados pela aba Notificacoes do painel (Content API do Twilio) e os seus
+// SIDs ficam em dados/whatsapp-templates.json.
+const ARQUIVO_TEMPLATES = path.join(DIRETORIO_DADOS, 'whatsapp-templates.json');
+
+function definicoesDeTemplates() {
+  const assinatura = PREFEITURA_NOME + ' – Atendimento ao Cidadão – SmartGov 360';
+  return {
+    recebido: {
+      titulo: 'Solicitação recebida',
+      corpo: 'Olá, {{1}}! Sua solicitação foi recebida com sucesso pela Prefeitura.\n\nSolicitação: {{2}}\nCategoria: {{3}}\nLocal: {{4}}\nStatus: Recebido\n\nA solicitação será encaminhada ao setor responsável para análise. Você será informado sempre que houver uma atualização.\n\n' + assinatura,
+      exemplos: { 1: 'Gian', 2: 'Buracos na rua com acúmulo de água', 3: 'Buracos', 4: 'Rua Pará, Centro, Ourinhos – SP' }
+    },
+    andamento: {
+      titulo: 'Solicitação em andamento',
+      corpo: 'Olá, {{1}}! Temos uma atualização sobre sua solicitação.\n\nSolicitação: {{2}}\nLocal: {{3}}\nStatus: Em andamento\n\nSua solicitação já foi encaminhada ao setor responsável e as providências necessárias estão sendo analisadas ou executadas. Você será informado quando o atendimento for concluído.\n\n' + assinatura,
+      exemplos: { 1: 'Gian', 2: 'Buracos na rua com acúmulo de água', 3: 'Rua Pará, Centro, Ourinhos – SP' }
+    },
+    concluido: {
+      titulo: 'Solicitação concluída',
+      corpo: 'Olá, {{1}}! Sua solicitação recebeu uma resposta da Prefeitura.\n\nSolicitação: {{2}}\nLocal: {{3}}\nStatus: Concluído\n\nResposta da Prefeitura: {{4}}\n\nAgradecemos sua participação. Sua colaboração ajuda a Prefeitura a identificar problemas e melhorar os serviços da cidade.\n\n' + assinatura,
+      exemplos: { 1: 'Gian', 2: 'Buracos na rua com acúmulo de água', 3: 'Rua Pará, Centro, Ourinhos – SP', 4: 'O serviço de reparo do pavimento foi realizado no local informado.' }
+    }
+  };
+}
+
+function lerTemplates() {
+  try {
+    const dados = JSON.parse(fs.readFileSync(ARQUIVO_TEMPLATES, 'utf8'));
+    return dados && typeof dados === 'object' ? dados : {};
+  } catch (error) {
+    return {};
+  }
+}
+
+function salvarTemplates(templates) {
+  fs.mkdirSync(DIRETORIO_DADOS, { recursive: true });
+  fs.writeFileSync(ARQUIVO_TEMPLATES, JSON.stringify(templates, null, 2), 'utf8');
+}
+
+function cabecalhoTwilio(json = false) {
+  const basicToken = Buffer.from(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`).toString('base64');
+  const headers = { Authorization: `Basic ${basicToken}` };
+  if (json) headers['Content-Type'] = 'application/json';
+  return headers;
+}
+
+// Cria o conteudo no Twilio e pede a aprovacao da Meta para o WhatsApp.
+async function criarTemplateNoTwilio(chave, definicao) {
+  const nome = `smartgov_${chave}_${new Date().toISOString().replace(/\D/g, '').slice(0, 12)}`;
+  const criado = await fetchFunc('https://content.twilio.com/v1/Content', {
+    method: 'POST',
+    signal: AbortSignal.timeout(TEMPO_LIMITE_ENVIO_MS),
+    headers: cabecalhoTwilio(true),
+    body: JSON.stringify({
+      friendly_name: nome,
+      language: 'pt_BR',
+      variables: Object.fromEntries(Object.entries(definicao.exemplos).map(([k, v]) => [String(k), v])),
+      types: { 'twilio/text': { body: definicao.corpo } }
+    })
+  });
+  const conteudo = await criado.json().catch(() => ({}));
+  if (!criado.ok || !conteudo.sid) {
+    throw new Error(conteudo.message || ('Twilio respondeu ' + criado.status + ' ao criar o template.'));
+  }
+
+  const pedido = await fetchFunc(`https://content.twilio.com/v1/Content/${conteudo.sid}/ApprovalRequests/whatsapp`, {
+    method: 'POST',
+    signal: AbortSignal.timeout(TEMPO_LIMITE_ENVIO_MS),
+    headers: cabecalhoTwilio(true),
+    body: JSON.stringify({ name: nome, category: 'UTILITY' })
+  });
+  const aprovacao = await pedido.json().catch(() => ({}));
+  if (!pedido.ok) {
+    throw new Error(aprovacao.message || ('Twilio respondeu ' + pedido.status + ' ao pedir a aprovação.'));
+  }
+
+  return { sid: conteudo.sid, nome, status: aprovacao.status || 'pending', criadoEm: new Date().toISOString() };
+}
+
+async function consultarAprovacaoTemplate(sid) {
+  const resposta = await fetchFunc(`https://content.twilio.com/v1/Content/${sid}/ApprovalRequests`, {
+    signal: AbortSignal.timeout(TEMPO_LIMITE_ENVIO_MS),
+    headers: cabecalhoTwilio()
+  });
+  const dados = await resposta.json().catch(() => ({}));
+  if (!resposta.ok) return { status: 'desconhecido', motivo: dados.message || ('HTTP ' + resposta.status) };
+  const wa = dados.whatsapp || {};
+  return { status: wa.status || 'desconhecido', motivo: wa.rejection_reason || null };
+}
+
+// Atualiza o status de cada template consultando o Twilio.
+async function statusDosTemplates(consultar = true) {
+  const salvos = lerTemplates();
+  const definicoes = definicoesDeTemplates();
+  const lista = [];
+  for (const chave of Object.keys(definicoes)) {
+    const item = salvos[chave];
+    if (!item?.sid) {
+      lista.push({ chave, titulo: definicoes[chave].titulo, status: 'nao_criado' });
+      continue;
+    }
+    if (consultar && TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN) {
+      try {
+        const atual = await consultarAprovacaoTemplate(item.sid);
+        item.status = atual.status;
+        item.motivo = atual.motivo;
+      } catch (error) {
+        item.motivo = 'Não foi possível consultar o Twilio: ' + error.message;
+      }
+    }
+    lista.push({ chave, titulo: definicoes[chave].titulo, ...item });
+  }
+  if (consultar) salvarTemplates(salvos);
+  return lista;
+}
+
+function templateAprovado(chave) {
+  const item = lerTemplates()[chave];
+  return item?.sid && item.status === 'approved' ? item.sid : null;
+}
+
+async function sendWhatsAppNotification(toPhone, text, template = null) {
   if (!TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN || !TWILIO_WHATSAPP_FROM) {
     return { sent: false, reason: 'WhatsApp provider is not configured.' };
   }
@@ -623,7 +756,19 @@ async function sendWhatsAppNotification(toPhone, text) {
   const params = new URLSearchParams();
   params.set('From', `whatsapp:${TWILIO_WHATSAPP_FROM}`);
   params.set('To', `whatsapp:${normalizedPhone}`);
-  params.set('Body', text);
+
+  // Com template aprovado, a mensagem pode ser a primeira da conversa.
+  const contentSid = template?.chave ? templateAprovado(template.chave) : null;
+  let usouTemplate = false;
+  if (contentSid) {
+    params.set('ContentSid', contentSid);
+    params.set('ContentVariables', JSON.stringify(
+      Object.fromEntries(Object.entries(template.variaveis || {}).map(([k, v]) => [String(k), (v ?? '').toString().replace(/\s*\n+\s*/g, ' ').trim()]))
+    ));
+    usouTemplate = true;
+  } else {
+    params.set('Body', text);
+  }
 
   const basicToken = Buffer.from(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`).toString('base64');
   const response = await fetchFunc(`https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`, {
@@ -643,13 +788,13 @@ async function sendWhatsAppNotification(toPhone, text) {
 
   // "sent" aqui significa aceito pelo Twilio (fila). A entrega ao aparelho e
   // confirmada depois, no status da mensagem (ver consultarStatusWhatsApp).
-  return { sent: true, providerId: data?.sid || null, status: data?.status || 'queued', para: normalizedPhone };
+  return { sent: true, providerId: data?.sid || null, status: data?.status || 'queued', para: normalizedPhone, usouTemplate };
 }
 
 // Erros mais comuns do WhatsApp via Twilio, traduzidos para quem configura.
 const ERROS_TWILIO = {
   63015: 'O número de destino não entrou no sandbox do Twilio. No WhatsApp, o destinatário precisa enviar "join <palavra-chave>" para o número do sandbox antes de receber mensagens.',
-  63016: 'Fora da janela de 24 horas: no WhatsApp só é possível enviar texto livre até 24 h depois da última mensagem do destinatário. Fora disso é preciso usar um template aprovado (ou, no sandbox, o destinatário reenviar "join <palavra-chave>").',
+  63016: 'Fora da janela de 24 horas: o WhatsApp só aceita texto livre até 24 h depois da última mensagem do destinatário. Para a prefeitura iniciar a conversa é preciso um template aprovado pela Meta: crie-os nesta aba em "Templates do WhatsApp".',
   63007: 'O número remetente (TWILIO_WHATSAPP_FROM) não é um canal de WhatsApp válido nesta conta Twilio.',
   63003: 'O número de destino não tem WhatsApp.',
   63024: 'Número de destino inválido para o WhatsApp.',
@@ -685,9 +830,11 @@ async function consultarStatusWhatsApp(sid) {
 // Envia um WhatsApp de teste e acompanha o status por alguns segundos, para o
 // painel mostrar se a mensagem chegou ou por que nao chegou.
 async function testarWhatsApp(para) {
+  const exemplos = definicoesDeTemplates().recebido.exemplos;
   const envio = await sendWhatsAppNotification(
     para,
-    'SmartGov 360: mensagem de teste enviada pelo painel administrativo em ' + new Date().toLocaleString('pt-BR') + '.'
+    'SmartGov 360: mensagem de teste enviada pelo painel administrativo em ' + new Date().toLocaleString('pt-BR') + '.',
+    { chave: 'recebido', variaveis: { ...exemplos, 2: 'Mensagem de teste do painel administrativo' } }
   ).catch((error) => ({ sent: false, reason: error.message }));
 
   if (!envio.sent || !envio.providerId) {
@@ -714,7 +861,8 @@ async function testarWhatsApp(para) {
     codigo: ultimo.codigo,
     reason: ultimo.erro || (falhou ? 'O Twilio não conseguiu entregar a mensagem.' : null),
     remetente: TWILIO_WHATSAPP_FROM,
-    sandbox: TWILIO_WHATSAPP_FROM === '+14155238886'
+    sandbox: TWILIO_WHATSAPP_FROM === '+14155238886',
+    usouTemplate: Boolean(envio.usouTemplate)
   };
 }
 
@@ -779,6 +927,33 @@ app.post('/api/auth/whatsapp/teste', auth.exigirAdminSistema, async (req, res) =
     'Tempo esgotado ao testar o WhatsApp.'
   );
   return res.status(resultado.sent ? 200 : 207).json(resultado);
+});
+
+app.get('/api/auth/whatsapp/templates', auth.exigirAdminSistema, async (req, res) => {
+  const consultar = req.query.consultar !== '0';
+  return res.json({ templates: await statusDosTemplates(consultar), configurado: Boolean(TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN && TWILIO_WHATSAPP_FROM) });
+});
+
+app.post('/api/auth/whatsapp/templates/criar', auth.exigirAdminSistema, async (req, res) => {
+  if (!TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN) {
+    return res.status(207).json({ ok: false, reason: 'WhatsApp (Twilio) não configurado no .env.' });
+  }
+  const salvos = lerTemplates();
+  const definicoes = definicoesDeTemplates();
+  const erros = [];
+  for (const [chave, definicao] of Object.entries(definicoes)) {
+    const atual = salvos[chave];
+    // Ja aprovado ou aguardando: nao cria de novo.
+    if (atual?.sid && ['approved', 'pending', 'received', 'submitted'].includes(atual.status)) continue;
+    try {
+      salvos[chave] = await criarTemplateNoTwilio(chave, definicao);
+    } catch (error) {
+      erros.push(definicao.titulo + ': ' + error.message);
+    }
+  }
+  salvarTemplates(salvos);
+  const templates = await statusDosTemplates(false);
+  return res.status(erros.length ? 207 : 200).json({ ok: !erros.length, reason: erros.join(' | ') || null, templates });
 });
 
 app.get('/api/auth/usuarios', auth.exigirAdminSistema, (req, res) => {

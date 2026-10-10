@@ -284,6 +284,13 @@
 
             <h3 style="margin-top:1.5rem;">Envio de WhatsApp ao cidadão</h3>
             <p class="preview-label">Envia uma mensagem de teste e mostra o status informado pelo Twilio.</p>
+            <div class="email-status" id="whatsapp-templates-status">Templates do WhatsApp: clique em <strong>Atualizar</strong> para consultar.</div>
+            <ul id="whatsapp-templates" class="diag-list"></ul>
+            <div class="field full" style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:1rem;">
+              <button id="whatsapp-templates-refresh" type="button" class="btn btn-secondary">Atualizar</button>
+              <button id="whatsapp-templates-create" type="button" class="btn btn-secondary">Criar templates e pedir aprovação</button>
+            </div>
+
             <form id="whatsapp-test-form" class="form-grid compact" autocomplete="off">
               <div class="field">
                 <label for="whatsapp-test-to">Enviar WhatsApp de teste para</label>

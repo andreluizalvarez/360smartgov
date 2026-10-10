@@ -286,6 +286,10 @@ function buildNotificationText(eventType, incident, actor, previousStatus, newSt
     const toStatus = newStatus || status;
     const local = localDaOcorrencia(incident);
     const chave = (toStatus || '').toString().trim().toLowerCase();
+    // A "resposta" e a ultima atualizacao de atendimento registrada pelo
+    // administrador na ocorrencia; sem ela, vai um texto padrao.
+    const respostaDaPrefeitura = (incident?.workUpdate || '').toString().trim()
+      || 'O atendimento da sua solicitação foi concluído pelo setor responsável.';
 
     // Assunto e paragrafos finais variam com o status; o corpo e o mesmo.
     const modelos = {
@@ -300,11 +304,12 @@ function buildNotificationText(eventType, incident, actor, previousStatus, newSt
       },
       'concluído': {
         subject: 'Sua solicitação foi concluída – SmartGov 360',
-        abertura: 'Temos uma atualização sobre sua solicitação:',
+        abertura: 'Sua solicitação recebeu uma resposta da Prefeitura.',
         fechamento: [
-          'O atendimento da sua solicitação foi concluído pelo setor responsável.',
+          'Resposta da Prefeitura:',
+          respostaDaPrefeitura,
           '',
-          'Agradecemos a sua colaboração com a cidade.'
+          'Agradecemos sua participação. Sua colaboração ajuda a Prefeitura a identificar problemas e melhorar os serviços da cidade.'
         ]
       }
     };

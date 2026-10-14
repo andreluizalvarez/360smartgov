@@ -31,8 +31,16 @@ const LIMITE_CAMPO = 300;
 // Campos que o painel pode alterar depois de aberta a ocorrencia.
 const CAMPOS_EDITAVEIS = [
   'status', 'workUpdate', 'workUpdatedBy', 'workUpdatedAt', 'history',
-  'latitude', 'longitude', 'category', 'priority'
+  'latitude', 'longitude', 'category', 'priority', 'respostaConclusao'
 ];
+
+// Versao do termo de consentimento (LGPD) aceito no formulario.
+const VERSAO_CONSENTIMENTO = '2026-10';
+
+function diasDesde(iso, agora = Date.now()) {
+  const t = Date.parse(iso || '');
+  return Number.isFinite(t) ? Math.max(0, (agora - t) / 86400000) : null;
+}
 
 function texto(valor, limite = LIMITE_CAMPO) {
   return (valor === undefined || valor === null ? '' : valor).toString().trim().slice(0, limite);
@@ -93,6 +101,12 @@ function criarIncidentes({ diretorioDados, papelAdminSistema }) {
       return { erro: 'A foto é grande demais. Envie uma imagem menor.', status: 413 };
     }
 
+    // LGPD: sem o aceite do termo a ocorrencia nao e gravada.
+    const consentimento = corpo.consentimento && typeof corpo.consentimento === 'object' ? corpo.consentimento : null;
+    if (!consentimento || consentimento.aceito !== true) {
+      return { erro: 'É preciso aceitar o termo de consentimento para o uso dos dados (LGPD).', status: 400 };
+    }
+
     const historico = Array.isArray(corpo.history) ? corpo.history.slice(0, 50) : [];
 
     const novo = {
@@ -119,6 +133,15 @@ function criarIncidentes({ diretorioDados, papelAdminSistema }) {
       workUpdatedAt: '',
       history: historico,
       status: STATUS_INICIAL,
+      respostaConclusao: '',
+      concluidoEm: '',
+      avaliacaoToken: '',
+      avaliacao: null,
+      consentimento: {
+        aceito: true,
+        em: new Date().toISOString(),
+        versao: texto(consentimento.versao) || VERSAO_CONSENTIMENTO
+      },
       createdAt: new Date().toISOString()
     };
 
@@ -161,9 +184,67 @@ function criarIncidentes({ diretorioDados, papelAdminSistema }) {
       }
     }
 
-    lista[indice] = { ...lista[indice], ...mudancas, updatedAt: new Date().toISOString() };
+    if (mudancas.respostaConclusao !== undefined) {
+      mudancas.respostaConclusao = texto(mudancas.respostaConclusao, LIMITE_TEXTO);
+    }
+
+    // Ao concluir: registra quando, e gera o link unico da pesquisa de satisfacao.
+    const atual = lista[indice];
+    if (mudancas.status === STATUS_FINAL && atual.status !== STATUS_FINAL) {
+      mudancas.concluidoEm = new Date().toISOString();
+      if (!atual.avaliacaoToken) mudancas.avaliacaoToken = crypto.randomBytes(18).toString('base64url');
+    }
+
+    lista[indice] = { ...atual, ...mudancas, updatedAt: new Date().toISOString() };
     salvar(lista);
     return { incidente: lista[indice] };
+  }
+
+  // ------------------------------------------------ pesquisa de satisfacao
+  //
+  // O cidadao recebe, na conclusao, um link com um token unico. A pagina
+  // publica so enxerga o minimo (titulo e status) e grava uma unica avaliacao.
+  function porTokenDeAvaliacao(token) {
+    const limpo = (token || '').toString().trim();
+    if (!limpo) return null;
+    return ler().find((item) => item.avaliacaoToken && item.avaliacaoToken === limpo) || null;
+  }
+
+  function consultarAvaliacao(token) {
+    const item = porTokenDeAvaliacao(token);
+    if (!item) return { erro: 'Link de avaliação inválido.', status: 404 };
+    return {
+      ocorrencia: {
+        title: item.title,
+        category: item.category,
+        status: item.status,
+        concluidoEm: item.concluidoEm || '',
+        respostaConclusao: item.respostaConclusao || '',
+        avaliada: Boolean(item.avaliacao)
+      }
+    };
+  }
+
+  function registrarAvaliacao(token, dados) {
+    const lista = ler();
+    const limpo = (token || '').toString().trim();
+    const indice = limpo ? lista.findIndex((item) => item.avaliacaoToken && item.avaliacaoToken === limpo) : -1;
+    if (indice === -1) return { erro: 'Link de avaliação inválido.', status: 404 };
+    if (lista[indice].status !== STATUS_FINAL) return { erro: 'A ocorrência ainda não foi concluída.', status: 409 };
+    if (lista[indice].avaliacao) return { erro: 'Esta ocorrência já foi avaliada. Obrigado!', status: 409 };
+
+    const nota = Number(dados?.nota);
+    if (!Number.isInteger(nota) || nota < 1 || nota > 5) {
+      return { erro: 'Informe uma nota de 1 a 5.', status: 400 };
+    }
+
+    lista[indice] = {
+      ...lista[indice],
+      avaliacao: { nota, comentario: texto(dados?.comentario, 1000), em: new Date().toISOString() },
+      updatedAt: new Date().toISOString()
+    };
+    salvar(lista);
+    return { avaliacao: lista[indice].avaliacao };
   }
 
   function remover(id, usuario) {
@@ -186,7 +267,7 @@ function criarIncidentes({ diretorioDados, papelAdminSistema }) {
   // Produtividade dos administradores de categoria, calculada a partir do
   // historico de cada ocorrencia (quem mudou o status ou registrou trabalho,
   // e quando). `dias` = 0 considera tudo.
-  function produtividade(usuarios, dias = 30) {
+  function produtividade(usuarios, dias = 30, { somenteUsuarioId = null } = {}) {
     const todas = ler();
     const agora = Date.now();
     const inicio = dias > 0 ? agora - dias * 24 * 60 * 60 * 1000 : 0;
@@ -195,7 +276,9 @@ function criarIncidentes({ diretorioDados, papelAdminSistema }) {
       return Number.isFinite(t) && t >= inicio && t <= agora;
     };
 
-    const operadores = (usuarios || []).filter((u) => u.role !== papelAdminSistema);
+    const operadores = (usuarios || [])
+      .filter((u) => u.role !== papelAdminSistema)
+      .filter((u) => !somenteUsuarioId || u.id === somenteUsuarioId);
 
     const linhas = operadores.map((usuario) => {
       const permitidas = new Set((usuario.allowedCategories || []).map(comparavel));
@@ -206,6 +289,8 @@ function criarIncidentes({ diretorioDados, papelAdminSistema }) {
       let resolvidas = 0;
       let somaHorasResolucao = 0;
       let ultimaAtividade = null;
+      let somaNotas = 0;
+      let avaliacoes = 0;
       const ocorrenciasTocadas = new Set();
 
       for (const item of todas) {
@@ -226,6 +311,10 @@ function criarIncidentes({ diretorioDados, papelAdminSistema }) {
               if (Number.isFinite(abertura) && Number.isFinite(fechamento) && fechamento >= abertura) {
                 somaHorasResolucao += (fechamento - abertura) / 3600000;
               }
+              if (item.avaliacao && Number.isFinite(Number(item.avaliacao.nota))) {
+                somaNotas += Number(item.avaliacao.nota);
+                avaliacoes += 1;
+              }
             }
           }
         }
@@ -244,6 +333,8 @@ function criarIncidentes({ diretorioDados, papelAdminSistema }) {
         acoes: mudancasStatus + atualizacoes,
         resolvidas,
         horasMediasResolucao: resolvidas ? Math.round((somaHorasResolucao / resolvidas) * 10) / 10 : null,
+        avaliacoes,
+        notaMedia: avaliacoes ? Math.round((somaNotas / avaliacoes) * 10) / 10 : null,
         ultimaAtividade
       };
     });
@@ -253,9 +344,11 @@ function criarIncidentes({ diretorioDados, papelAdminSistema }) {
     const total = linhas.reduce((acc, linha) => {
       acc.acoes += linha.acoes;
       acc.resolvidas += linha.resolvidas;
+      acc.avaliacoes += linha.avaliacoes;
+      acc.somaNotas += (linha.notaMedia || 0) * linha.avaliacoes;
       if (linha.acoes > 0) acc.ativos += 1;
       return acc;
-    }, { acoes: 0, resolvidas: 0, ativos: 0 });
+    }, { acoes: 0, resolvidas: 0, ativos: 0, avaliacoes: 0, somaNotas: 0 });
 
     const comMedia = linhas.filter((linha) => linha.horasMediasResolucao !== null);
     const horasMedias = comMedia.length
@@ -266,12 +359,114 @@ function criarIncidentes({ diretorioDados, papelAdminSistema }) {
     return {
       dias,
       geradoEm: new Date(agora).toISOString(),
-      resumo: { usuarios: linhas.length, ativos: total.ativos, acoes: total.acoes, resolvidas: total.resolvidas, horasMediasResolucao: horasMedias },
+      resumo: {
+        usuarios: linhas.length, ativos: total.ativos, acoes: total.acoes, resolvidas: total.resolvidas,
+        horasMediasResolucao: horasMedias,
+        avaliacoes: total.avaliacoes,
+        notaMedia: total.avaliacoes ? Math.round((total.somaNotas / total.avaliacoes) * 10) / 10 : null
+      },
       usuarios: linhas
     };
   }
 
-  return { listar, criar, atualizar, remover, limpar, produtividade, CAMPOS_EDITAVEIS, STATUS_VALIDOS };
+  // ------------------------------------------------ visao executiva
+  //
+  // Numeros agregados da cidade para o prefeito: status, tempo de resposta,
+  // problemas e bairros mais frequentes, atrasos por secretaria (usuario de
+  // categoria) e as ocorrencias abertas ha mais tempo. E tambem a base de
+  // dados reais que o resumo por IA recebe.
+  function visaoExecutiva(usuarios, dias = 30, { limiteAtrasoDias = 7 } = {}) {
+    const todas = ler();
+    const agora = Date.now();
+    const inicio = dias > 0 ? agora - dias * 86400000 : 0;
+    const noPeriodo = (iso) => {
+      const t = Date.parse(iso || '');
+      return Number.isFinite(t) && t >= inicio && t <= agora;
+    };
+    const doPeriodo = todas.filter((item) => noPeriodo(item.createdAt));
+    const abertas = todas.filter((item) => item.status !== STATUS_FINAL);
+    const concluidasNoPeriodo = todas.filter((item) => item.status === STATUS_FINAL && noPeriodo(item.concluidoEm || item.updatedAt));
+
+    const contar = (lista, chave) => {
+      const mapa = new Map();
+      for (const item of lista) {
+        const valor = texto(chave(item)) || 'Não informado';
+        mapa.set(valor, (mapa.get(valor) || 0) + 1);
+      }
+      return [...mapa.entries()].map(([nome, total]) => ({ nome, total })).sort((a, b) => b.total - a.total);
+    };
+
+    const porCategoria = contar(doPeriodo, (i) => i.category).map((c) => ({
+      ...c,
+      abertas: abertas.filter((i) => comparavel(i.category) === comparavel(c.nome)).length
+    }));
+    const porBairro = contar(doPeriodo, (i) => i.neighborhood || i.city);
+
+    const horas = concluidasNoPeriodo
+      .map((i) => (Date.parse(i.concluidoEm || i.updatedAt || '') - Date.parse(i.createdAt || '')) / 3600000)
+      .filter((h) => Number.isFinite(h) && h >= 0);
+    const horasMedias = horas.length ? Math.round((horas.reduce((a, b) => a + b, 0) / horas.length) * 10) / 10 : null;
+
+    const atrasadas = abertas
+      .map((i) => ({ id: i.id, title: i.title, category: i.category, bairro: i.neighborhood || i.city || '', status: i.status, diasAberta: Math.floor(diasDesde(i.createdAt, agora) || 0) }))
+      .filter((i) => i.diasAberta >= limiteAtrasoDias)
+      .sort((a, b) => b.diasAberta - a.diasAberta);
+
+    const secretarias = (usuarios || [])
+      .filter((u) => u.role !== papelAdminSistema)
+      .map((u) => {
+        const permitidas = new Set((u.allowedCategories || []).map(comparavel));
+        const suas = todas.filter((i) => permitidas.has(comparavel(i.category)));
+        const suasAbertas = suas.filter((i) => i.status !== STATUS_FINAL);
+        const suasAtrasadas = suasAbertas.filter((i) => (diasDesde(i.createdAt, agora) || 0) >= limiteAtrasoDias);
+        const concluidas = suas.filter((i) => i.status === STATUS_FINAL && noPeriodo(i.concluidoEm || i.updatedAt));
+        const notas = suas.filter((i) => i.avaliacao).map((i) => Number(i.avaliacao.nota));
+        return {
+          id: u.id,
+          username: u.username,
+          categorias: u.allowedCategories || [],
+          total: suas.length,
+          abertas: suasAbertas.length,
+          atrasadas: suasAtrasadas.length,
+          concluidasNoPeriodo: concluidas.length,
+          maisAntigaDias: suasAbertas.length ? Math.floor(Math.max(...suasAbertas.map((i) => diasDesde(i.createdAt, agora) || 0))) : 0,
+          notaMedia: notas.length ? Math.round((notas.reduce((a, b) => a + b, 0) / notas.length) * 10) / 10 : null
+        };
+      })
+      .sort((a, b) => b.atrasadas - a.atrasadas || b.abertas - a.abertas);
+
+    const notas = todas.filter((i) => i.avaliacao).map((i) => Number(i.avaliacao.nota));
+
+    return {
+      dias,
+      limiteAtrasoDias,
+      geradoEm: new Date(agora).toISOString(),
+      totais: {
+        historico: todas.length,
+        noPeriodo: doPeriodo.length,
+        abertas: abertas.length,
+        recebidas: abertas.filter((i) => i.status === STATUS_INICIAL).length,
+        emAndamento: abertas.filter((i) => i.status === 'Em andamento').length,
+        concluidasNoPeriodo: concluidasNoPeriodo.length,
+        taxaConclusao: doPeriodo.length ? Math.round((doPeriodo.filter((i) => i.status === STATUS_FINAL).length / doPeriodo.length) * 100) : null,
+        horasMediasConclusao: horasMedias,
+        atrasadas: atrasadas.length,
+        notaMedia: notas.length ? Math.round((notas.reduce((a, b) => a + b, 0) / notas.length) * 10) / 10 : null,
+        avaliacoes: notas.length
+      },
+      porCategoria: porCategoria.slice(0, 10),
+      porBairro: porBairro.slice(0, 10),
+      secretarias,
+      atrasadas: atrasadas.slice(0, 40),
+      recentes: doPeriodo.slice(0, 40).map((i) => ({ id: i.id, title: i.title, category: i.category, bairro: i.neighborhood || i.city || '', status: i.status, diasAberta: Math.floor(diasDesde(i.createdAt, agora) || 0), nota: i.avaliacao?.nota ?? null }))
+    };
+  }
+
+  return {
+    listar, criar, atualizar, remover, limpar, produtividade, visaoExecutiva,
+    consultarAvaliacao, registrarAvaliacao,
+    CAMPOS_EDITAVEIS, STATUS_VALIDOS, VERSAO_CONSENTIMENTO
+  };
 }
 
 module.exports = { criarIncidentes, STATUS_INICIAL, STATUS_FINAL, STATUS_VALIDOS, normalizarStatus };

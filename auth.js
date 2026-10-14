@@ -371,7 +371,8 @@ function criarAuth({ diretorioDados }) {
     removerUsuario,
     alterarSenha,
     listarUsuarios,
-    validarToken
+    validarToken,
+    assinar
   };
 }
 

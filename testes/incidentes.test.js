@@ -89,7 +89,7 @@ async function esperarServidor() {
 
   const servidor = spawn(process.execPath, ['server.js'], {
     cwd: RAIZ,
-    env: { ...process.env, PORT: String(PORTA), ADMIN_INITIAL_PASSWORD: 'admin123' },
+    env: { ...process.env, PORT: String(PORTA), ADMIN_INITIAL_PASSWORD: 'admin123', OPENAI_API_KEY: '', EMAIL_PROVIDER: 'nenhum' },
     stdio: ['ignore', 'pipe', 'pipe']
   });
   servidor.stderr.on('data', (d) => console.log('[servidor]', d.toString().trim().slice(0, 200)));
@@ -117,30 +117,35 @@ async function esperarServidor() {
     let buraco;
     let poste;
     {
-      const vazia = await pedir('POST', '/api/incidentes', { name: 'x' });
+      const vazia = await pedir('POST', '/api/incidentes', { name: 'x', consentimento: { aceito: true } });
       ok(vazia.status === 400, 'ocorrencia sem resumo nem descricao e recusada');
+
+      const semConsentimento = await pedir('POST', '/api/incidentes', { title: 'Sem aceite', category: 'Buraco' });
+      ok(semConsentimento.status === 400 && /LGPD/.test(semConsentimento.corpo.error), 'sem o aceite do termo (LGPD) a ocorrencia e recusada');
 
       const r1 = await pedir('POST', '/api/incidentes', {
         name: 'Maria', email: 'maria@email.com', title: 'Buraco na via', category: 'Buraco',
         priority: 'Urgente', description: 'Buraco grande', latitude: '-23.5', longitude: '-46.6',
-        photoDataUrl: 'data:image/jpeg;base64,/9j/4AAQ', status: 'Concluída', id: 'forjado'
+        photoDataUrl: 'data:image/jpeg;base64,/9j/4AAQ', status: 'Concluída', id: 'forjado',
+        consentimento: { aceito: true, versao: '2026-10' }
       });
+      ok(r1.corpo.incidente.consentimento?.aceito === true && r1.corpo.incidente.consentimento.em, 'o consentimento fica registrado com data');
       ok(r1.status === 201, 'POST /api/incidentes grava sem token');
       buraco = r1.corpo.incidente;
       ok(buraco.id !== 'forjado' && buraco.status === 'Recebido', 'id e status iniciais sao definidos pelo servidor');
       ok(buraco.photoDataUrl.startsWith('data:image/jpeg'), 'a foto e guardada');
 
       const r2 = await pedir('POST', '/api/incidentes', {
-        title: 'Poste apagado', category: 'Iluminação pública', priority: 'Alta', description: 'Sem luz'
+        title: 'Poste apagado', category: 'Iluminação pública', priority: 'Alta', description: 'Sem luz', consentimento: { aceito: true }
       });
       poste = r2.corpo.incidente;
       ok(r2.status === 201 && poste.id, 'segunda ocorrencia gravada');
 
-      const fotoInvalida = await pedir('POST', '/api/incidentes', { title: 'x', photoDataUrl: 'http://evil/x.jpg' });
+      const fotoInvalida = await pedir('POST', '/api/incidentes', { title: 'x', photoDataUrl: 'http://evil/x.jpg', consentimento: { aceito: true } });
       ok(fotoInvalida.status === 400, 'foto que nao e data URL de imagem e recusada');
 
       const fotoGrande = await pedir('POST', '/api/incidentes', {
-        title: 'x', photoDataUrl: 'data:image/jpeg;base64,' + 'A'.repeat(2 * 1024 * 1024 + 10)
+        title: 'x', photoDataUrl: 'data:image/jpeg;base64,' + 'A'.repeat(2 * 1024 * 1024 + 10), consentimento: { aceito: true }
       });
       ok(fotoGrande.status === 413, 'foto acima do limite responde 413');
 
@@ -198,11 +203,12 @@ async function esperarServidor() {
       const semToken = await pedir('GET', '/api/incidentes/produtividade');
       ok(semToken.status === 401, 'produtividade sem token responde 401');
       const comoOperador = await pedir('GET', '/api/incidentes/produtividade', null, tokenOperador);
-      ok(comoOperador.status === 403, 'admin de categoria nao acessa a produtividade');
+      ok(comoOperador.status === 200 && comoOperador.corpo.usuarios.every((u) => u.username === 'operador'), 'admin de categoria acessa a produtividade, mas so a propria');
 
       const agora = new Date().toISOString();
       const resolver = await pedir('PUT', '/api/incidentes/' + buraco.id, {
         status: 'Concluído',
+        respostaConclusao: 'O reparo do pavimento foi realizado.',
         history: [
           { id: 'h1', type: 'status', text: 'Status alterado de Recebido para Em andamento', by: 'operador', at: agora },
           { id: 'h2', type: 'work', text: 'Equipe no local', by: 'operador', at: agora },
@@ -210,6 +216,26 @@ async function esperarServidor() {
         ]
       }, tokenOperador);
       ok(resolver.status === 200, 'operador conclui a ocorrencia com historico');
+      ok(resolver.corpo.incidente.respostaConclusao === 'O reparo do pavimento foi realizado.' && resolver.corpo.incidente.concluidoEm, 'a conclusao guarda a resposta ao cidadao e a data');
+      const tokenAvaliacao = resolver.corpo.incidente.avaliacaoToken;
+      ok(typeof tokenAvaliacao === 'string' && tokenAvaliacao.length > 10, 'a conclusao gera o token da pesquisa de satisfacao');
+
+      console.log('\nPesquisa de satisfacao (publica)');
+      {
+        const invalida = await pedir('GET', '/api/avaliacao/nao-existe');
+        ok(invalida.status === 404, 'token invalido responde 404');
+        const consulta = await pedir('GET', '/api/avaliacao/' + tokenAvaliacao);
+        ok(consulta.status === 200 && consulta.corpo.ocorrencia.title === 'Buraco na via' && consulta.corpo.ocorrencia.avaliada === false, 'o link mostra so titulo, categoria, status e resposta');
+        ok(consulta.corpo.ocorrencia.email === undefined && consulta.corpo.ocorrencia.photoDataUrl === undefined, 'nao expoe dados pessoais nem a foto');
+        const notaRuim = await pedir('POST', '/api/avaliacao/' + tokenAvaliacao, { nota: 9 });
+        ok(notaRuim.status === 400, 'nota fora de 1..5 e recusada');
+        const avaliada = await pedir('POST', '/api/avaliacao/' + tokenAvaliacao, { nota: 4, comentario: 'Demorou um pouco, mas resolveu.' });
+        ok(avaliada.status === 201 && avaliada.corpo.avaliacao.nota === 4, 'avaliacao gravada');
+        const repetida = await pedir('POST', '/api/avaliacao/' + tokenAvaliacao, { nota: 1 });
+        ok(repetida.status === 409, 'segunda avaliacao e recusada');
+        const noPainel = (await pedir('GET', '/api/incidentes', null, token)).corpo.incidentes.find((i) => i.id === buraco.id);
+        ok(noPainel.avaliacao?.nota === 4 && noPainel.avaliacao.comentario.includes('resolveu'), 'o painel enxerga a avaliacao');
+      }
 
       const invalido = await pedir('PUT', '/api/incidentes/' + buraco.id, { status: 'Qualquer coisa' }, token);
       ok(invalido.status === 400, 'status fora da lista e recusado');
@@ -227,11 +253,38 @@ async function esperarServidor() {
       ok(linha.resolvidas === 1 && linha.mudancasStatus === 2 && linha.atualizacoes === 1 && linha.acoes === 3, 'conta resolvidas, mudancas de status e atualizacoes');
       ok(linha.ocorrenciasTocadas === 1 && linha.naCategoria === 1 && linha.abertasNaCategoria === 0, 'conta ocorrencias tocadas e abertas na categoria');
       ok(typeof linha.horasMediasResolucao === 'number' && linha.horasMediasResolucao >= 0, 'calcula o tempo medio de resolucao');
+      ok(linha.avaliacoes === 1 && linha.notaMedia === 4 && prod.corpo.resumo.notaMedia === 4, 'a nota do cidadao entra na produtividade');
+
+      const propria = await pedir('GET', '/api/incidentes/produtividade?dias=30', null, tokenOperador);
+      ok(propria.status === 200 && propria.corpo.usuarios.length === 1 && propria.corpo.usuarios[0].username === 'operador', 'admin de categoria ve so a propria secretaria');
+      const umSo = await pedir('GET', '/api/incidentes/produtividade?dias=30&usuario=' + linha.id, null, token);
+      ok(umSo.corpo.usuarios.length === 1 && umSo.corpo.resumo.usuarios === 1, 'admin do sistema filtra a produtividade por usuario');
+      const pdfIndividual = await pedirBruto('GET', '/api/incidentes/produtividade/pdf?dias=30&usuario=' + linha.id, token);
+      ok(pdfIndividual.status === 200 && /produtividade-operador-30dias/.test(pdfIndividual.disposicao), 'PDF individual por secretaria');
+      const pdfOperador = await pedirBruto('GET', '/api/incidentes/produtividade/pdf?dias=30', tokenOperador);
+      ok(pdfOperador.status === 200 && /produtividade-operador-/.test(pdfOperador.disposicao), 'admin de categoria exporta o proprio PDF');
+
+      console.log('\nVisao executiva');
+      {
+        const semToken = await pedir('GET', '/api/incidentes/executivo');
+        ok(semToken.status === 401, 'visao executiva sem token responde 401');
+        const operadorVe = await pedir('GET', '/api/incidentes/executivo', null, tokenOperador);
+        ok(operadorVe.status === 403, 'admin de categoria nao acessa a visao executiva');
+        const exec = await pedir('GET', '/api/incidentes/executivo?dias=30', null, token);
+        ok(exec.status === 200 && exec.corpo.totais.historico === 2 && exec.corpo.totais.abertas === 1, 'totais da cidade');
+        ok(exec.corpo.porCategoria.length === 2 && exec.corpo.porCategoria[0].total === 1, 'ocorrencias por categoria');
+        ok(exec.corpo.secretarias.some((s) => s.username === 'operador' && s.concluidasNoPeriodo === 1), 'secretarias com concluidas no periodo');
+        ok(exec.corpo.totais.notaMedia === 4 && exec.corpo.totais.avaliacoes === 1, 'nota media da cidade');
+        const resumo = await pedir('POST', '/api/incidentes/executivo/resumo', { dias: 30 }, token);
+        ok(resumo.status === 503 && /OPENAI/.test(resumo.corpo.error), 'sem chave da IA o resumo explica a indisponibilidade');
+      }
       ok(prod.corpo.resumo.resolvidas === 1 && prod.corpo.resumo.ativos === 1, 'resumo agrega os usuarios');
       ok(!prod.corpo.usuarios.some((u) => u.username === 'admin'), 'o admin do sistema nao entra na medicao');
 
       const pdfSemToken = await pedir('GET', '/api/incidentes/produtividade/pdf');
       ok(pdfSemToken.status === 401, 'PDF sem token responde 401');
+      const pdfUsuarioInexistente = await pedir('GET', '/api/incidentes/produtividade/pdf?usuario=nao-existe', null, token);
+      ok(pdfUsuarioInexistente.status === 404, 'PDF de usuario inexistente responde 404');
       const pdf = await pedirBruto('GET', '/api/incidentes/produtividade/pdf?dias=30', token);
       ok(pdf.status === 200 && /application\/pdf/.test(pdf.tipo) && pdf.corpo.slice(0, 4).toString() === '%PDF', 'PDF do relatorio e gerado');
       ok(/produtividade-30dias-/.test(pdf.disposicao), 'nome do arquivo traz o periodo');

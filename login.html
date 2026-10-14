@@ -67,6 +67,7 @@
               <button id="tab-priorities" class="tab-button" role="tab">Prioridades</button>
               <button id="tab-users" class="tab-button" role="tab">Usuários</button>
               <button id="tab-password" class="tab-button" role="tab">Minha senha</button>
+              <button id="tab-executive" class="tab-button" role="tab">Visão executiva</button>
               <button id="tab-productivity" class="tab-button" role="tab">Produtividade</button>
               <button id="tab-notifications" class="tab-button" role="tab">Notificações</button>
             </div>
@@ -99,6 +100,7 @@
                 </tbody>
               </table>
             </div>
+            <nav id="incident-pager" class="pager" aria-label="Paginação das ocorrências"></nav>
 
             <div id="incident-detail-panel" class="tab-panel hidden" aria-hidden="true">
               <div class="section-heading">
@@ -120,6 +122,11 @@
                 <p><strong>Atualização da equipe:</strong></p>
                 <p id="detail-work-update"></p>
                 <p><strong>Última atualização por:</strong> <span id="detail-work-meta"></span></p>
+                <div id="detail-conclusion-wrap" hidden>
+                  <p><strong>Resposta ao cidadão na conclusão:</strong></p>
+                  <p id="detail-conclusion"></p>
+                </div>
+                <p><strong>Avaliação do cidadão:</strong> <span id="detail-rating"></span></p>
                 <p><strong>Histórico:</strong></p>
                 <ul id="detail-work-history" class="work-history-list"></ul>
               </div>
@@ -214,11 +221,66 @@
             <div id="senha-message" class="form-message" role="status" aria-live="polite"></div>
           </div>
 
+          <div id="panel-executive" class="tab-panel hidden">
+            <div class="prod-header">
+              <div>
+                <h3>Visão executiva</h3>
+                <p class="preview-label">A cidade em números: o que entra, o que está parado e onde agir primeiro.</p>
+              </div>
+              <label class="prod-period">
+                Período
+                <select id="exec-period">
+                  <option value="7">Últimos 7 dias</option>
+                  <option value="30" selected>Últimos 30 dias</option>
+                  <option value="90">Últimos 90 dias</option>
+                  <option value="0">Todo o histórico</option>
+                </select>
+              </label>
+            </div>
+            <div id="exec-tiles" class="prod-tiles" aria-live="polite"></div>
+
+            <div class="exec-grid">
+              <section class="exec-card">
+                <h4>Problemas mais recorrentes</h4>
+                <ul id="exec-categories" class="rank-list"></ul>
+              </section>
+              <section class="exec-card">
+                <h4>Bairros com mais ocorrências</h4>
+                <ul id="exec-neighborhoods" class="rank-list"></ul>
+              </section>
+              <section class="exec-card">
+                <h4>Atrasos por secretaria</h4>
+                <ul id="exec-secretariats" class="rank-list"></ul>
+              </section>
+              <section class="exec-card">
+                <h4>Abertas há mais tempo</h4>
+                <ul id="exec-delayed" class="rank-list"></ul>
+              </section>
+            </div>
+
+            <section class="exec-card exec-ai">
+              <h4>Resumo executivo por IA</h4>
+              <p class="preview-label">Pergunte sobre a cidade. A resposta usa só as ocorrências registradas e aponta os registros que a sustentam.</p>
+              <div class="exec-chips">
+                <button type="button" class="chip" data-exec-question="Quais são os cinco problemas mais recorrentes na cidade no período?">5 problemas mais recorrentes</button>
+                <button type="button" class="chip" data-exec-question="Qual secretaria apresenta mais atrasos e por quê?">Secretaria com mais atrasos</button>
+                <button type="button" class="chip" data-exec-question="Quais bairros precisam de intervenção prioritária?">Bairros prioritários</button>
+                <button type="button" class="chip" data-exec-question="Faça um resumo executivo do período para a reunião de secretariado.">Resumo para a reunião</button>
+              </div>
+              <div class="exec-ask">
+                <input id="exec-question" type="text" placeholder="Ex.: Onde estão concentrados os buracos abertos há mais de 15 dias?" />
+                <button id="exec-ask" type="button" class="btn btn-secondary">Gerar resumo</button>
+              </div>
+              <div id="exec-summary" class="exec-summary"></div>
+            </section>
+            <div id="exec-message" class="form-message" role="status" aria-live="polite"></div>
+          </div>
+
           <div id="panel-productivity" class="tab-panel hidden">
             <div class="prod-header">
               <div>
-                <h3>Produtividade por administrador de categoria</h3>
-                <p class="preview-label">Ações registradas no histórico das ocorrências: mudanças de status e atualizações de atendimento.</p>
+                <h3 id="prod-title">Produtividade por administrador de categoria</h3>
+                <p id="prod-subtitle" class="preview-label">Ações registradas no histórico das ocorrências: mudanças de status e atualizações de atendimento.</p>
               </div>
               <div class="prod-actions">
               <label class="prod-period">
@@ -228,6 +290,12 @@
                   <option value="30" selected>Últimos 30 dias</option>
                   <option value="90">Últimos 90 dias</option>
                   <option value="0">Todo o histórico</option>
+                </select>
+              </label>
+              <label class="prod-period">
+                Relatório em PDF
+                <select id="prod-export-user">
+                  <option value="">Relatório geral (todos)</option>
                 </select>
               </label>
               <button id="prod-export-pdf" type="button" class="btn btn-secondary prod-export">Exportar PDF</button>
@@ -256,6 +324,7 @@
                     <th class="num">Ocorrências tocadas</th>
                     <th class="num">Tempo médio p/ resolver</th>
                     <th class="num">Abertas nas categorias</th>
+                    <th class="num">Nota do cidadão</th>
                     <th>Última atividade</th>
                   </tr>
                 </thead>
@@ -322,6 +391,20 @@
         <p>© <span id="year"></span></p>
       </div>
     </footer>
+
+    <dialog id="conclude-modal" class="geo-modal" aria-labelledby="conclude-modal-title">
+      <div class="geo-modal-content">
+        <h3 id="conclude-modal-title">Concluir ocorrência</h3>
+        <p class="geo-modal-intro">Ocorrência: <strong id="conclude-incident-title"></strong></p>
+        <p class="geo-modal-intro">Escreva ao cidadão o que foi feito. Este texto vai no e-mail e no WhatsApp de conclusão, junto com o convite para avaliar o atendimento.</p>
+        <textarea id="conclude-text" rows="4" placeholder="Ex.: O serviço de reparo do pavimento foi realizado no local informado."></textarea>
+        <div class="geo-modal-actions" style="margin-top:0.9rem;">
+          <button type="button" id="conclude-confirm" class="btn btn-secondary">Concluir e notificar</button>
+          <button type="button" id="conclude-cancel" class="btn btn-ghost">Cancelar</button>
+        </div>
+        <p id="conclude-message" class="geo-modal-message error" role="status" aria-live="polite"></p>
+      </div>
+    </dialog>
 
     <script src="script.js"></script>
     <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyBG8dQ387nVgYJGCBBzU35b6n5lugYe9KU&callback=onGoogleMapsLoaded" async defer></script>

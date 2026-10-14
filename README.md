@@ -119,6 +119,26 @@ versão nova está mesmo no ar.
 - notificações ao cidadão: `/api/notify-user`
 - ocorrências: `POST /api/incidentes` (abertura pública), `GET`/`PUT`/`DELETE /api/incidentes[/:id]` (painel, com sessão)
 
+## Perfis de acesso
+
+- **Cidadão**: sem login. Registra a ocorrência em `index.html`, aceita o termo de
+  consentimento (LGPD, texto em `privacidade.html`), acompanha por e-mail/WhatsApp e,
+  na conclusão, avalia o atendimento pelo link único de `avaliar.html`.
+- **Secretário (administrador por categoria)**: vê e atua só nas ocorrências das suas
+  categorias; a aba Produtividade mostra "Minha secretaria" e exporta o próprio PDF.
+- **Prefeito / administrador do sistema**: tudo acima mais Categorias, Prioridades,
+  Usuários, Notificações, a aba **Visão executiva** (indicadores da cidade, atrasos por
+  secretaria e o resumo executivo por IA fundamentado nas ocorrências reais) e os
+  relatórios de produtividade gerais e individuais.
+
+## Filtro de fotos
+
+Toda foto passa por duas verificações antes de abrir a ocorrência: a moderação da
+OpenAI (conteúdo sexual, violento ou de ódio) e a classificação, que recusa imagens
+sem relação com um problema urbano (QR code, selfie, documento, tela). A aprovação
+gera uma assinatura (`fotoToken`) exigida pelo servidor no envio, então não dá para
+pular o filtro mandando a foto direto para a API.
+
 ## Dados
 
 Tudo o que o sistema grava fica em `dados/` (fora do git): `usuarios.json`,

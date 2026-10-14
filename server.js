@@ -29,6 +29,8 @@ const RESEND_FROM_EMAIL = process.env.RESEND_FROM_EMAIL;
 const BREVO_API_KEY = (process.env.BREVO_API_KEY || '').trim();
 const BREVO_FROM_EMAIL = (process.env.BREVO_FROM_EMAIL || '').trim();
 const BREVO_FROM_NAME = (process.env.BREVO_FROM_NAME || 'SmartGov 360').trim();
+// Endereco publico do site: usado nos links enviados ao cidadao (avaliacao).
+const SITE_URL = (process.env.SITE_URL || 'https://www.360smartgov.com.br').trim().replace(/\/+$/, '');
 const TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID;
 const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN;
 const TWILIO_WHATSAPP_FROM = process.env.TWILIO_WHATSAPP_FROM;
@@ -160,6 +162,64 @@ function esquemaDeClassificacao(categorias, prioridades) {
   };
 }
 
+// A foto so vale se mostrar um problema urbano: o modelo tambem diz se a
+// imagem e relevante (QR code, selfie, documento ou tela nao abrem ocorrencia).
+function esquemaDeClassificacaoImagem(categorias, prioridades) {
+  const base = esquemaDeClassificacao(categorias, prioridades);
+  base.json_schema.name = 'classificacao_foto_ocorrencia';
+  base.json_schema.schema.properties.relevante = { type: 'boolean' };
+  base.json_schema.schema.properties.motivo = { type: 'string' };
+  base.json_schema.schema.required = [...base.json_schema.schema.required, 'relevante', 'motivo'];
+  return base;
+}
+
+// Assinatura que prova que a foto passou pelo filtro: o envio da ocorrencia
+// so e aceito com ela (impede mandar a foto direto para a API, sem filtro).
+function hashDaFoto(buffer) {
+  return require('crypto').createHash('sha256').update(buffer).digest('hex');
+}
+
+function tokenDaFoto(buffer) {
+  return auth.assinar('foto:' + hashDaFoto(buffer));
+}
+
+function fotoTokenConfere(dataUrl, token) {
+  if (!token || typeof token !== 'string') return false;
+  const base64 = (dataUrl || '').toString().split(',')[1] || '';
+  let esperado;
+  try {
+    esperado = tokenDaFoto(Buffer.from(base64, 'base64'));
+  } catch (error) {
+    return false;
+  }
+  const a = Buffer.from(esperado);
+  const b = Buffer.from(token);
+  return a.length === b.length && require('crypto').timingSafeEqual(a, b);
+}
+
+// Moderacao da OpenAI: barra conteudo sexual, violento ou de odio antes da
+// classificacao. Falha de rede nao bloqueia (o filtro de relevancia segue).
+async function fotoImpropria(dataUrl) {
+  try {
+    const resposta = await fetchFunc('https://api.openai.com/v1/moderations', {
+      method: 'POST',
+      signal: AbortSignal.timeout(TEMPO_LIMITE_ENVIO_MS),
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${OPENAI_API_KEY}` },
+      body: JSON.stringify({ model: 'omni-moderation-latest', input: [{ type: 'image_url', image_url: { url: dataUrl } }] })
+    });
+    const dados = await resposta.json().catch(() => ({}));
+    const resultado = dados.results?.[0];
+    if (!resultado) return false;
+    if (!resultado.flagged) return false;
+    const categorias = Object.entries(resultado.categories || {}).filter(([, v]) => v).map(([k]) => k);
+    console.warn('[foto] recusada pela moderacao:', categorias.join(', '));
+    return true;
+  } catch (error) {
+    console.warn('[foto] moderacao indisponivel:', error.message);
+    return false;
+  }
+}
+
 app.use(express.static(path.join(__dirname)));
 // A ocorrencia chega com a foto em base64 no corpo: o limite padrao de 100 kb nao basta.
 app.use(express.json({ limit: '4mb' }));
@@ -288,8 +348,10 @@ function buildNotificationText(eventType, incident, actor, previousStatus, newSt
     const chave = (toStatus || '').toString().trim().toLowerCase();
     // A "resposta" e a ultima atualizacao de atendimento registrada pelo
     // administrador na ocorrencia; sem ela, vai um texto padrao.
-    const respostaDaPrefeitura = (incident?.workUpdate || '').toString().trim()
+    const respostaDaPrefeitura = (incident?.respostaConclusao || '').toString().trim()
+      || (incident?.workUpdate || '').toString().trim()
       || 'O atendimento da sua solicitação foi concluído pelo setor responsável.';
+    const linkAvaliacao = incident?.avaliacaoToken ? `${SITE_URL}/avaliar.html?t=${encodeURIComponent(incident.avaliacaoToken)}` : '';
 
     // Assunto e paragrafos finais variam com o status; o corpo e o mesmo.
     const modelos = {
@@ -309,7 +371,8 @@ function buildNotificationText(eventType, incident, actor, previousStatus, newSt
           'Resposta da Prefeitura:',
           respostaDaPrefeitura,
           '',
-          'Agradecemos sua participação. Sua colaboração ajuda a Prefeitura a identificar problemas e melhorar os serviços da cidade.'
+          'Agradecemos sua participação. Sua colaboração ajuda a Prefeitura a identificar problemas e melhorar os serviços da cidade.',
+          ...(linkAvaliacao ? ['', 'Avalie o atendimento e deixe sua sugestão (leva menos de um minuto):', linkAvaliacao] : [])
         ]
       }
     };
@@ -989,7 +1052,12 @@ app.delete('/api/auth/usuarios/:id', auth.exigirAdminSistema, (req, res) => {
 // Abertura e publica (o cidadao nao tem login). Leitura e alteracao exigem
 // sessao, e o admin de categoria so enxerga e altera o que lhe cabe.
 app.post('/api/incidentes', (req, res) => {
-  const resultado = incidentes.criar(req.body || {});
+  const corpo = req.body || {};
+  // Com a IA configurada, toda foto precisa ter passado pelo filtro.
+  if (OPENAI_API_KEY && corpo.photoDataUrl && !fotoTokenConfere(corpo.photoDataUrl, corpo.fotoToken)) {
+    return res.status(422).json({ error: 'A foto precisa passar pela verificação antes do envio. Volte ao formulário e envie a ocorrência novamente.' });
+  }
+  const resultado = incidentes.criar(corpo);
   if (resultado.erro) {
     return res.status(resultado.status).json({ error: resultado.erro });
   }
@@ -1024,9 +1092,107 @@ app.delete('/api/incidentes/:id', auth.exigirAutenticacao, (req, res) => {
 });
 
 // Produtividade dos administradores de categoria (so admin do sistema).
-app.get('/api/incidentes/produtividade', auth.exigirAdminSistema, (req, res) => {
+// Admin do sistema ve todos (ou um usuario, com ?usuario=id); o admin de
+// categoria ve so a propria secretaria.
+function filtroDeProdutividade(req) {
   const dias = Math.max(0, Math.min(365, Number(req.query.dias ?? 30) || 0));
-  return res.json(incidentes.produtividade(auth.listarUsuarios(), dias));
+  const ehAdmin = req.usuario.role === auth.PAPEL_ADMIN_SISTEMA;
+  const somenteUsuarioId = ehAdmin ? ((req.query.usuario || '').toString().trim() || null) : req.usuario.id;
+  return { dias, somenteUsuarioId };
+}
+
+app.get('/api/incidentes/produtividade', auth.exigirAutenticacao, (req, res) => {
+  const { dias, somenteUsuarioId } = filtroDeProdutividade(req);
+  return res.json(incidentes.produtividade(auth.listarUsuarios(), dias, { somenteUsuarioId }));
+});
+
+// ------------------------------------------------ visao executiva (prefeito)
+app.get('/api/incidentes/executivo', auth.exigirAdminSistema, (req, res) => {
+  const dias = Math.max(0, Math.min(365, Number(req.query.dias ?? 30) || 0));
+  return res.json(incidentes.visaoExecutiva(auth.listarUsuarios(), dias));
+});
+
+// Resumo executivo por IA, fundamentado so nos numeros e ocorrencias reais
+// enviados no prompt. Cada conclusao aponta os ids que a sustentam.
+app.post('/api/incidentes/executivo/resumo', auth.exigirAdminSistema, async (req, res) => {
+  if (!OPENAI_API_KEY) {
+    return res.status(503).json({ error: 'A IA não está configurada no servidor (OPENAI_API_KEY).' });
+  }
+  const dias = Math.max(0, Math.min(365, Number(req.body?.dias ?? 30) || 0));
+  const pergunta = (req.body?.pergunta || '').toString().trim().slice(0, 500);
+  const dados = incidentes.visaoExecutiva(auth.listarUsuarios(), dias);
+  const idsValidos = new Set([...dados.atrasadas, ...dados.recentes].map((i) => i.id));
+
+  const perguntaPadrao = 'Quais são os cinco problemas mais recorrentes na cidade no período? Qual secretaria apresenta mais atrasos? Quais bairros precisam de intervenção prioritária?';
+  const instrucoes = `Você é o analista de dados de uma prefeitura. Responda à pergunta do prefeito usando EXCLUSIVAMENTE os dados em JSON abaixo, que são as ocorrências reais registradas pelos cidadãos no SmartGov 360. Não invente números, bairros, secretarias nem ocorrências. Se os dados não permitirem responder a algo, diga isso. Escreva em português do Brasil, direto e curto, para leitura em reunião. "Secretaria" aqui é o usuário administrador de categoria e as categorias que ele atende. Em cada conclusão, liste em "ocorrencias" os ids (campo "id") das ocorrências que a sustentam, só os que existem nos dados; a lista pode ficar vazia quando a conclusão for sobre totais.`;
+
+  const esquema = {
+    type: 'json_schema',
+    name: 'resumo_executivo',
+    strict: true,
+    schema: {
+      type: 'object',
+      properties: {
+        resumo: { type: 'string' },
+        conclusoes: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              titulo: { type: 'string' },
+              texto: { type: 'string' },
+              ocorrencias: { type: 'array', items: { type: 'string' } }
+            },
+            required: ['titulo', 'texto', 'ocorrencias'],
+            additionalProperties: false
+          }
+        },
+        recomendacoes: { type: 'array', items: { type: 'string' } }
+      },
+      required: ['resumo', 'conclusoes', 'recomendacoes'],
+      additionalProperties: false
+    }
+  };
+
+  try {
+    const resposta = await fetchFunc('https://api.openai.com/v1/responses', {
+      method: 'POST',
+      signal: AbortSignal.timeout(60000),
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${OPENAI_API_KEY}` },
+      body: JSON.stringify({
+        model: 'gpt-4.1-mini',
+        temperature: 0.2,
+        input: [
+          { role: 'system', content: [{ type: 'input_text', text: instrucoes }] },
+          { role: 'user', content: [{ type: 'input_text', text: 'Pergunta do prefeito: ' + (pergunta || perguntaPadrao) + '\n\nDados (JSON):\n' + JSON.stringify(dados) }] }
+        ],
+        text: { format: esquema }
+      })
+    });
+    const data = await resposta.json().catch(() => ({}));
+    if (!resposta.ok || data.error) {
+      return res.status(502).json({ error: data.error?.message || 'A IA não respondeu.' });
+    }
+    const textoSaida = (data.output || []).flatMap((item) => item.content || []).filter((c) => c.type === 'output_text').map((c) => c.text || '').join('\n').trim();
+    const parsed = parseJsonFromText(textoSaida);
+    parsed.conclusoes = (parsed.conclusoes || []).map((c) => ({ ...c, ocorrencias: (c.ocorrencias || []).filter((id) => idsValidos.has(id)) }));
+    return res.json({ pergunta: pergunta || perguntaPadrao, dias, geradoEm: dados.geradoEm, ...parsed });
+  } catch (error) {
+    return res.status(502).json({ error: 'Falha ao gerar o resumo: ' + error.message });
+  }
+});
+
+// ------------------------------------------------ pesquisa de satisfacao (publica)
+app.get('/api/avaliacao/:token', (req, res) => {
+  const resultado = incidentes.consultarAvaliacao(req.params.token);
+  if (resultado.erro) return res.status(resultado.status).json({ error: resultado.erro });
+  return res.json(resultado);
+});
+
+app.post('/api/avaliacao/:token', (req, res) => {
+  const resultado = incidentes.registrarAvaliacao(req.params.token, req.body || {});
+  if (resultado.erro) return res.status(resultado.status).json({ error: resultado.erro });
+  return res.status(201).json(resultado);
 });
 
 // ------------------------------------------------ relatorio de produtividade em PDF
@@ -1060,9 +1226,9 @@ function gerarPdfProdutividade(dados, res) {
   // Cabecalho
   doc.fillColor(VERDE).font('Helvetica-Bold').fontSize(10).text('SMARTGOV 360 — ' + PREFEITURA_NOME.toUpperCase(), { characterSpacing: 1 });
   doc.moveDown(0.3);
-  doc.fillColor(TEXTO).fontSize(20).text('Relatório de produtividade');
+  doc.fillColor(TEXTO).fontSize(20).text(dados.individual ? `Relatório de produtividade — ${dados.individual}` : 'Relatório de produtividade');
   doc.fillColor(MUTED).font('Helvetica').fontSize(10)
-    .text(`Administradores de categoria · ${periodo} · gerado em ${dataHoraLegivel(dados.geradoEm)}`);
+    .text(`${dados.individual ? 'Secretaria: ' + ((dados.usuarios[0]?.categorias || []).join(', ') || 'sem categorias') : 'Administradores de categoria'} · ${periodo} · gerado em ${dataHoraLegivel(dados.geradoEm)}`);
   doc.moveDown(1);
 
   // Resumo em quatro blocos
@@ -1070,7 +1236,7 @@ function gerarPdfProdutividade(dados, res) {
   const blocos = [
     [String(r.resolvidas), 'ocorrências concluídas'],
     [String(r.acoes), 'ações registradas'],
-    [`${r.ativos}/${r.usuarios}`, 'usuários ativos'],
+    dados.individual ? [r.notaMedia !== null ? r.notaMedia.toLocaleString('pt-BR') + ' / 5' : '—', `nota do cidadão (${r.avaliacoes} avaliações)`] : [`${r.ativos}/${r.usuarios}`, 'usuários ativos'],
     [horasLegiveis(r.horasMediasResolucao), 'tempo médio para concluir']
   ];
   const larguraBloco = (larguraUtil - 3 * 10) / 4;
@@ -1115,9 +1281,10 @@ function gerarPdfProdutividade(dados, res) {
     ['Status', 38, 'right'],
     ['Atualiz.', 42, 'right'],
     ['Tocadas', 42, 'right'],
-    ['Tempo médio', 58, 'right'],
-    ['Abertas', 42, 'right'],
-    ['Última atividade', 93, 'right']
+    ['Tempo médio', 56, 'right'],
+    ['Abertas', 40, 'right'],
+    ['Nota', 32, 'right'],
+    ['Última atividade', 63, 'right']
   ];
   const alturaCabecalho = 18;
 
@@ -1150,7 +1317,9 @@ function gerarPdfProdutividade(dados, res) {
     }
     const valores = [
       u.username, categorias, String(u.resolvidas), String(u.mudancasStatus), String(u.atualizacoes),
-      String(u.ocorrenciasTocadas), horasLegiveis(u.horasMediasResolucao), String(u.abertasNaCategoria), dataHoraLegivel(u.ultimaAtividade)
+      String(u.ocorrenciasTocadas), horasLegiveis(u.horasMediasResolucao), String(u.abertasNaCategoria),
+      u.notaMedia !== null && u.notaMedia !== undefined ? u.notaMedia.toLocaleString('pt-BR') : '—',
+      u.ultimaAtividade ? new Date(u.ultimaAtividade).toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' }) : '—'
     ];
     let x = esquerda;
     colunas.forEach(([, largura, alinh], i) => {
@@ -1177,12 +1346,17 @@ function gerarPdfProdutividade(dados, res) {
   doc.end();
 }
 
-app.get('/api/incidentes/produtividade/pdf', auth.exigirAdminSistema, (req, res) => {
-  const dias = Math.max(0, Math.min(365, Number(req.query.dias ?? 30) || 0));
-  const dados = incidentes.produtividade(auth.listarUsuarios(), dias);
+app.get('/api/incidentes/produtividade/pdf', auth.exigirAutenticacao, (req, res) => {
+  const { dias, somenteUsuarioId } = filtroDeProdutividade(req);
+  const dados = incidentes.produtividade(auth.listarUsuarios(), dias, { somenteUsuarioId });
+  if (somenteUsuarioId) {
+    dados.individual = dados.usuarios[0]?.username || null;
+    if (!dados.individual) return res.status(404).json({ error: 'Usuário não encontrado.' });
+  }
   const carimbo = new Date().toISOString().slice(0, 10);
+  const sufixo = dados.individual ? '-' + dados.individual.replace(/[^a-z0-9_.-]+/gi, '_') : '';
   res.setHeader('Content-Type', 'application/pdf');
-  res.setHeader('Content-Disposition', `attachment; filename="produtividade-${dias > 0 ? dias + 'dias' : 'historico'}-${carimbo}.pdf"`);
+  res.setHeader('Content-Disposition', `attachment; filename="produtividade${sufixo}-${dias > 0 ? dias + 'dias' : 'historico'}-${carimbo}.pdf"`);
   try {
     gerarPdfProdutividade(dados, res);
   } catch (error) {
@@ -1327,7 +1501,18 @@ app.post('/api/classify-image', upload.single('photo'), async (req, res) => {
   categories = categoriasEmVigor(categories);
   const categoryText = categories.map((item) => `• ${item}`).join('; ');
   const priorityText = priorities.join(', ');
-  const promptText = `Esta chamada trata-se de um aplicativo de zeladoria pública. Utilize a foto enviada pelo usuário como evidência. Classifique a ocorrência usando EXCLUSIVAMENTE uma das categorias desta lista, copiada exatamente como está escrita: ${categoryText}. Não crie categorias novas nem variações de escrita: se nada se encaixar, use "${categoriaGenerica(categories)}". Classifique a prioridade entre: ${priorityText}.`;
+  const promptText = `Esta chamada trata-se de um aplicativo de zeladoria pública. Utilize a foto enviada pelo usuário como evidência.
+
+Primeiro avalie se a foto mostra um problema de zeladoria urbana em espaço público que a prefeitura possa atender (buraco na via, iluminação, lixo, entulho, poda, calçada, drenagem, sinalização, praça, equipamento público etc.). Se a foto NÃO mostrar isso — por exemplo QR code, documento, tela de celular ou computador, selfie, pessoa, animal de estimação, produto, interior de casa, imagem genérica ou ilegível — defina relevante=false e explique em "motivo", em uma frase curta em português dirigida ao cidadão, por que a foto não serve. Se mostrar, defina relevante=true e motivo vazio.
+
+Depois classifique a ocorrência usando EXCLUSIVAMENTE uma das categorias desta lista, copiada exatamente como está escrita: ${categoryText}. Não crie categorias novas nem variações de escrita: se nada se encaixar, use "${categoriaGenerica(categories)}". Classifique a prioridade entre: ${priorityText}.`;
+
+  if (await fotoImpropria(dataUrl)) {
+    return res.status(422).json({
+      rejeitada: true,
+      error: 'A foto foi recusada por conter conteúdo impróprio. Envie uma foto do problema no local.'
+    });
+  }
 
   try {
     console.debug('OpenAI /responses promptText:', promptText);
@@ -1352,14 +1537,13 @@ app.post('/api/classify-image', upload.single('photo'), async (req, res) => {
         text: {
           format: {
             type: 'json_schema',
-            ...esquemaDeClassificacao(categories, priorities).json_schema
+            ...esquemaDeClassificacaoImagem(categories, priorities).json_schema
           }
         }
       })
     });
 
     const data = await response.json();
-    console.debug('OpenAI /responses raw response:', data);
 
     if (data.error) {
       return res.status(response.status || 500).json({
@@ -1383,13 +1567,20 @@ app.post('/api/classify-image', upload.single('photo'), async (req, res) => {
       return res.status(500).json({ error: 'Resposta do modelo não estava em JSON válido.', raw: text });
     }
 
+    if (parsed.relevante === false) {
+      console.warn('[foto] recusada por irrelevancia:', parsed.motivo);
+      return res.status(422).json({
+        rejeitada: true,
+        error: 'A foto não parece mostrar um problema urbano. ' + (parsed.motivo || '') + ' Envie uma foto do problema no local.'
+      });
+    }
+
     return res.json({
       category: normalizeCategory(parsed.category, categories),
       priority: normalizePriority(parsed.priority),
       title: parsed.title || '',
       description: parsed.description || '',
-      raw_model_text: text,
-      raw_model_response: data
+      fotoToken: tokenDaFoto(buffer)
     });
   } catch (error) {
     return res.status(500).json({ error: 'Erro ao chamar a API da OpenAI.', details: error.message });

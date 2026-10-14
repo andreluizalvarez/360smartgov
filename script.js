@@ -437,8 +437,8 @@ function syncUsersWithCurrentCategories() {
 }
 
 function updateTabVisibilityByRole() {
-  const restrictedTabs = [tabCategories, tabPriorities, tabUsers, tabNotifications, tabProductivity];
-  const restrictedPanels = [panelCategories, panelPriorities, panelUsers, panelNotifications, panelProductivity];
+  const restrictedTabs = [tabCategories, tabPriorities, tabUsers, tabNotifications, tabExecutive];
+  const restrictedPanels = [panelCategories, panelPriorities, panelUsers, panelNotifications, panelExecutive];
 
   if (isSystemAdmin()) {
     restrictedTabs.forEach((tab) => {
@@ -719,7 +719,7 @@ window.smartgovIncidentes = {
       const resposta = await fetch('/api/incidentes', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(item)
+        body: JSON.stringify({ ...item, consentimento: { aceito: true, em: item.createdAt || new Date().toISOString(), versao: 'migracao' } })
       });
       if (resposta.ok) enviadas += 1;
       else console.warn('Falhou:', item.id, await resposta.text());
@@ -1319,6 +1319,45 @@ async function saveIncidentWorkUpdate(id, workUpdate) {
   showMessage(adminMessage, 'Atualização da ocorrência salva com sucesso.', false);
 }
 
+const ITENS_POR_PAGINA = 10;
+let paginaAtual = 1;
+const incidentPager = document.getElementById('incident-pager');
+
+function renderPager(total) {
+  if (!incidentPager) return;
+  const paginas = Math.max(1, Math.ceil(total / ITENS_POR_PAGINA));
+  if (paginas <= 1) {
+    incidentPager.innerHTML = '';
+    return;
+  }
+  const inicio = (paginaAtual - 1) * ITENS_POR_PAGINA + 1;
+  const fim = Math.min(total, paginaAtual * ITENS_POR_PAGINA);
+  const botoes = [];
+  for (let p = 1; p <= paginas; p++) {
+    // Mostra a primeira, a ultima e duas em volta da atual; o resto vira reticencias.
+    if (p === 1 || p === paginas || Math.abs(p - paginaAtual) <= 2) {
+      botoes.push(`<button type="button" class="pager-btn${p === paginaAtual ? ' active' : ''}" data-page="${p}" ${p === paginaAtual ? 'aria-current="page"' : ''}>${p}</button>`);
+    } else if (botoes[botoes.length - 1] !== '<span class="pager-gap">…</span>') {
+      botoes.push('<span class="pager-gap">…</span>');
+    }
+  }
+  incidentPager.innerHTML = `
+    <span class="pager-info">${inicio}–${fim} de ${total}</span>
+    <button type="button" class="pager-btn" data-page="${paginaAtual - 1}" ${paginaAtual === 1 ? 'disabled' : ''} aria-label="Página anterior">‹</button>
+    ${botoes.join('')}
+    <button type="button" class="pager-btn" data-page="${paginaAtual + 1}" ${paginaAtual === paginas ? 'disabled' : ''} aria-label="Próxima página">›</button>`;
+}
+
+if (incidentPager) {
+  incidentPager.addEventListener('click', (event) => {
+    const btn = event.target.closest('button[data-page]');
+    if (!btn || btn.disabled) return;
+    paginaAtual = Number(btn.dataset.page) || 1;
+    refreshDashboard();
+    document.querySelector('#panel-occurrences .table-wrap')?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  });
+}
+
 function renderIncidents(incidents) {
   if (!incidentList) {
     return;
@@ -1326,10 +1365,17 @@ function renderIncidents(incidents) {
 
   if (!incidents.length) {
     incidentList.innerHTML = '<tr><td colspan="6">Nenhuma ocorrência cadastrada até o momento.</td></tr>';
+    renderPager(0);
     return;
   }
 
-  incidentList.innerHTML = incidents
+  const paginas = Math.max(1, Math.ceil(incidents.length / ITENS_POR_PAGINA));
+  if (paginaAtual > paginas) paginaAtual = paginas;
+  if (paginaAtual < 1) paginaAtual = 1;
+  const pagina = incidents.slice((paginaAtual - 1) * ITENS_POR_PAGINA, paginaAtual * ITENS_POR_PAGINA);
+  renderPager(incidents.length);
+
+  incidentList.innerHTML = pagina
     .map((item) => `
       <tr data-id="${item.id}">
         <td>
@@ -1415,6 +1461,21 @@ function showIncidentDetail(id) {
     detailWorkMeta.textContent = incident.workUpdatedBy
       ? `${incident.workUpdatedBy}${incident.workUpdatedAt ? ` em ${new Date(incident.workUpdatedAt).toLocaleString('pt-BR')}` : ''}`
       : 'Sem registro';
+  }
+  const detailConclusion = document.getElementById('detail-conclusion');
+  const detailConclusionWrap = document.getElementById('detail-conclusion-wrap');
+  if (detailConclusion && detailConclusionWrap) {
+    detailConclusionWrap.hidden = incident.status !== 'Concluído';
+    detailConclusion.textContent = incident.respostaConclusao || 'Sem resposta registrada na conclusão.';
+  }
+  const detailRating = document.getElementById('detail-rating');
+  if (detailRating) {
+    if (incident.avaliacao) {
+      const nota = Number(incident.avaliacao.nota) || 0;
+      detailRating.innerHTML = `<span class="stars" aria-label="${nota} de 5">${'★'.repeat(nota)}${'☆'.repeat(5 - nota)}</span> ${nota}/5${incident.avaliacao.comentario ? ' — ' + escapeHtml(incident.avaliacao.comentario) : ''}<br /><small>em ${new Date(incident.avaliacao.em).toLocaleString('pt-BR')}</small>`;
+    } else {
+      detailRating.textContent = incident.status === 'Concluído' ? 'O cidadão ainda não avaliou.' : 'Disponível após a conclusão.';
+    }
   }
   renderIncidentHistory(incident);
   if (detailImage) {
@@ -1515,12 +1576,15 @@ async function classifyImage(file) {
       body: form
     });
 
+    if (resp.status === 422) {
+      const corpo = await resp.json().catch(() => ({}));
+      return { rejeitada: true, motivo: corpo.error || 'A foto não foi aceita.' };
+    }
     if (!resp.ok) {
       return null;
     }
 
     const data = await resp.json();
-    console.debug('Response from /api/classify-image:', data);
     return data;
   } catch (error) {
     return null;
@@ -1898,6 +1962,15 @@ if (occurrenceForm) {
       }
     }
 
+    // LGPD: sem o aceite, nada e enviado.
+    const consentCheckbox = document.getElementById('lgpd-consent');
+    if (consentCheckbox && !consentCheckbox.checked) {
+      showMessage(formMessage, 'Para enviar, é preciso aceitar o termo de consentimento para o uso dos seus dados.', true);
+      consentCheckbox.focus();
+      consentCheckbox.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      return;
+    }
+
     // Nos dois modos a ocorrencia sai com logradouro, numero e cidade: a
     // localizacao automatica nem sempre traz o numero, e ai o cidadao completa.
     {
@@ -1936,6 +2009,14 @@ if (occurrenceForm) {
       let imgResult = null;
       if (photoFile) {
         imgResult = await classifyImage(photoFile);
+      }
+
+      // Foto recusada pelo filtro (conteudo improprio ou sem relacao com um
+      // problema urbano): a ocorrencia nao segue.
+      if (imgResult?.rejeitada) {
+        showMessage(formMessage, imgResult.motivo, true);
+        photoInput?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        return;
       }
 
       if (imgResult) {
@@ -1996,6 +2077,8 @@ if (occurrenceForm) {
         state,
         phone,
         photoDataUrl,
+        fotoToken: imgResult?.fotoToken || '',
+        consentimento: { aceito: true, em: new Date().toISOString(), versao: '2026-10' },
         workUpdate: '',
         workUpdatedBy: '',
         workUpdatedAt: '',
@@ -2118,6 +2201,168 @@ if (senhaForm) {
   });
 }
 
+// ---------- Conclusao: resposta ao cidadao ----------
+const concludeModal = document.getElementById('conclude-modal');
+const concludeText = document.getElementById('conclude-text');
+const concludeTitle = document.getElementById('conclude-incident-title');
+const concludeConfirm = document.getElementById('conclude-confirm');
+const concludeCancel = document.getElementById('conclude-cancel');
+const concludeMessage = document.getElementById('conclude-message');
+
+// Abre o dialogo e resolve com o texto digitado, ou null se cancelado.
+function pedirRespostaDeConclusao(incident) {
+  if (!concludeModal || typeof concludeModal.showModal !== 'function') {
+    const texto = window.prompt('Descreva ao cidadão o que foi feito (vai no e-mail de conclusão):', incident.workUpdate || '');
+    return Promise.resolve(texto === null ? null : texto.trim());
+  }
+  return new Promise((resolve) => {
+    if (concludeTitle) concludeTitle.textContent = incident.title || 'Ocorrência';
+    if (concludeText) concludeText.value = incident.workUpdate || '';
+    if (concludeMessage) concludeMessage.textContent = '';
+
+    const fechar = (valor) => {
+      concludeConfirm?.removeEventListener('click', onConfirm);
+      concludeCancel?.removeEventListener('click', onCancel);
+      concludeModal.removeEventListener('cancel', onCancelEvent);
+      if (concludeModal.open) concludeModal.close();
+      resolve(valor);
+    };
+    const onConfirm = () => {
+      const texto = (concludeText?.value || '').trim();
+      if (texto.length < 10) {
+        if (concludeMessage) concludeMessage.textContent = 'Escreva ao menos uma frase sobre o que foi feito.';
+        concludeText?.focus();
+        return;
+      }
+      fechar(texto);
+    };
+    const onCancel = () => fechar(null);
+    const onCancelEvent = (event) => { event.preventDefault(); fechar(null); };
+
+    concludeConfirm?.addEventListener('click', onConfirm);
+    concludeCancel?.addEventListener('click', onCancel);
+    concludeModal.addEventListener('cancel', onCancelEvent);
+    concludeModal.showModal();
+    concludeText?.focus();
+  });
+}
+
+// ---------- Visao executiva (prefeito) ----------
+const execPeriod = document.getElementById('exec-period');
+const execTiles = document.getElementById('exec-tiles');
+const execCategories = document.getElementById('exec-categories');
+const execNeighborhoods = document.getElementById('exec-neighborhoods');
+const execSecretariats = document.getElementById('exec-secretariats');
+const execDelayed = document.getElementById('exec-delayed');
+const execQuestion = document.getElementById('exec-question');
+const execAskBtn = document.getElementById('exec-ask');
+const execSummary = document.getElementById('exec-summary');
+const execMessage = document.getElementById('exec-message');
+
+function linkOcorrencia(id, texto) {
+  return `<a href="#" class="incident-link" data-open-incident="${escapeHtml(id)}">${escapeHtml(texto)}</a>`;
+}
+
+function renderExecutivo(d) {
+  const t = d.totais;
+  if (execTiles) {
+    const tiles = [
+      [t.noPeriodo, 'ocorrências no período'],
+      [t.abertas, 'abertas hoje'],
+      [t.taxaConclusao !== null ? t.taxaConclusao + '%' : '—', 'concluídas no período'],
+      [formatarHoras(t.horasMediasConclusao), 'tempo médio de conclusão'],
+      [t.atrasadas, `abertas há mais de ${d.limiteAtrasoDias} dias`],
+      [t.notaMedia !== null ? t.notaMedia.toLocaleString('pt-BR') + ' / 5' : '—', `nota do cidadão (${t.avaliacoes})`]
+    ];
+    execTiles.innerHTML = tiles.map(([v, r]) => `<div class="prod-tile"><span class="valor">${escapeHtml(String(v))}</span><span class="rotulo">${r}</span></div>`).join('');
+  }
+  const lista = (el, itens, render) => {
+    if (!el) return;
+    el.innerHTML = itens.length ? itens.map(render).join('') : '<li class="vazio">Sem dados no período.</li>';
+  };
+  const max = (arr, k) => Math.max(1, ...arr.map((i) => i[k] || 0));
+  const mc = max(d.porCategoria, 'total');
+  lista(execCategories, d.porCategoria.slice(0, 5), (c) => `<li><span class="rank-nome">${escapeHtml(c.nome)}</span><span class="rank-barra"><i style="width:${Math.round((c.total / mc) * 100)}%"></i></span><span class="rank-num">${c.total}<small> · ${c.abertas} abertas</small></span></li>`);
+  const mb = max(d.porBairro, 'total');
+  lista(execNeighborhoods, d.porBairro.slice(0, 5), (b) => `<li><span class="rank-nome">${escapeHtml(b.nome)}</span><span class="rank-barra"><i style="width:${Math.round((b.total / mb) * 100)}%"></i></span><span class="rank-num">${b.total}</span></li>`);
+  lista(execSecretariats, d.secretarias, (s) => `<li class="${s.atrasadas ? 'alerta' : ''}"><span class="rank-nome"><strong>${escapeHtml(s.username)}</strong><small>${escapeHtml(s.categorias.join(', ') || '—')} · ${s.abertas} abertas · ${s.concluidasNoPeriodo} concluídas${s.maisAntigaDias ? ' · mais antiga há ' + s.maisAntigaDias + ' dias' : ''}</small></span><span class="rank-num">${s.atrasadas} atrasada${s.atrasadas === 1 ? '' : 's'}</span></li>`);
+  lista(execDelayed, d.atrasadas.slice(0, 10), (i) => `<li><span class="rank-nome">${linkOcorrencia(i.id, i.title || 'Ocorrência')}<small>${escapeHtml(i.category)}${i.bairro ? ' · ' + escapeHtml(i.bairro) : ''} · ${escapeHtml(i.status)}</small></span><span class="rank-num badge-dias">${i.diasAberta} dias</span></li>`);
+}
+
+async function carregarExecutivo() {
+  if (!execTiles || !isSystemAdmin()) return;
+  const dias = execPeriod ? execPeriod.value : '30';
+  showMessage(execMessage, 'Carregando...', false);
+  try {
+    const resposta = await apiAutenticada(`/api/incidentes/executivo?dias=${encodeURIComponent(dias)}`);
+    const dados = await resposta.json().catch(() => ({}));
+    if (!resposta.ok) {
+      showMessage(execMessage, dados.error || 'Não foi possível carregar a visão executiva.', true);
+      return;
+    }
+    renderExecutivo(dados);
+    showMessage(execMessage, '', false);
+  } catch (error) {
+    showMessage(execMessage, 'Não foi possível falar com o servidor.', true);
+  }
+}
+
+if (execPeriod) execPeriod.addEventListener('change', carregarExecutivo);
+
+document.querySelectorAll('[data-exec-question]').forEach((chip) => {
+  chip.addEventListener('click', () => {
+    if (execQuestion) execQuestion.value = chip.dataset.execQuestion;
+    execAskBtn?.click();
+  });
+});
+
+if (execAskBtn) {
+  execAskBtn.addEventListener('click', async () => {
+    if (!ensureSystemAdminAction()) return;
+    const pergunta = execQuestion?.value?.trim() || '';
+    execAskBtn.disabled = true;
+    if (execSummary) execSummary.innerHTML = '<p class="muted">Analisando as ocorrências reais do período... (até 1 minuto)</p>';
+    try {
+      const resposta = await apiAutenticada('/api/incidentes/executivo/resumo', {
+        method: 'POST',
+        body: JSON.stringify({ dias: execPeriod ? execPeriod.value : '30', pergunta })
+      });
+      const r = await resposta.json().catch(() => ({}));
+      if (!resposta.ok) {
+        if (execSummary) execSummary.innerHTML = `<p class="form-message error">${escapeHtml(r.error || 'A IA não respondeu.')}</p>`;
+        return;
+      }
+      const porId = new Map(getIncidents().map((i) => [i.id, i]));
+      const refs = (ids) => ids.length
+        ? `<p class="exec-refs">Baseado em: ${ids.map((id) => linkOcorrencia(id, (porId.get(id)?.title || 'ocorrência ' + id.slice(0, 8)))).join(', ')}</p>`
+        : '';
+      if (execSummary) {
+        execSummary.innerHTML = `
+          <p class="exec-pergunta"><strong>Pergunta:</strong> ${escapeHtml(r.pergunta)}</p>
+          <p class="exec-resumo">${escapeHtml(r.resumo)}</p>
+          ${(r.conclusoes || []).map((c) => `<section class="exec-conclusao"><h4>${escapeHtml(c.titulo)}</h4><p>${escapeHtml(c.texto)}</p>${refs(c.ocorrencias || [])}</section>`).join('')}
+          ${(r.recomendacoes || []).length ? `<section class="exec-conclusao"><h4>Recomendações</h4><ul>${r.recomendacoes.map((x) => `<li>${escapeHtml(x)}</li>`).join('')}</ul></section>` : ''}
+          <p class="muted"><small>Resumo gerado por IA a partir das ocorrências registradas (${r.dias > 0 ? 'últimos ' + r.dias + ' dias' : 'todo o histórico'}), em ${new Date(r.geradoEm).toLocaleString('pt-BR')}. Confira os registros antes de decidir.</small></p>`;
+      }
+    } catch (error) {
+      if (execSummary) execSummary.innerHTML = '<p class="form-message error">Não foi possível falar com o servidor.</p>';
+    } finally {
+      execAskBtn.disabled = false;
+    }
+  });
+}
+
+// Links "ver ocorrência" em qualquer painel abrem o detalhe na aba Ocorrencias.
+document.addEventListener('click', (event) => {
+  const link = event.target.closest('a[data-open-incident]');
+  if (!link) return;
+  event.preventDefault();
+  const id = link.dataset.openIncident;
+  switchTab('occurrences');
+  showIncidentDetail(id);
+  document.getElementById('incident-detail-panel')?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+});
+
 // ---------- Produtividade dos administradores de categoria ----------
 const prodPeriod = document.getElementById('prod-period');
 const prodTiles = document.getElementById('prod-tiles');
@@ -2144,7 +2389,8 @@ function renderProdTiles(resumo) {
     [resumo.resolvidas, 'ocorrências resolvidas'],
     [resumo.acoes, 'ações registradas'],
     [`${resumo.ativos}/${resumo.usuarios}`, 'usuários ativos'],
-    [formatarHoras(resumo.horasMediasResolucao), 'tempo médio para resolver']
+    [formatarHoras(resumo.horasMediasResolucao), 'tempo médio para concluir'],
+    [resumo.notaMedia !== null && resumo.notaMedia !== undefined ? resumo.notaMedia.toLocaleString('pt-BR') + ' / 5' : '—', `nota do cidadão (${resumo.avaliacoes || 0} avaliações)`]
   ];
   prodTiles.innerHTML = tiles.map(([valor, rotulo]) => `
     <div class="prod-tile"><span class="valor">${escapeHtml(String(valor))}</span><span class="rotulo">${rotulo}</span></div>`).join('');
@@ -2210,6 +2456,7 @@ function renderProdTable(usuarios) {
       <td class="num">${u.ocorrenciasTocadas}</td>
       <td class="num">${formatarHoras(u.horasMediasResolucao)}</td>
       <td class="num">${u.abertasNaCategoria}</td>
+      <td class="num">${u.notaMedia !== null && u.notaMedia !== undefined ? u.notaMedia.toLocaleString('pt-BR') + ' (' + u.avaliacoes + ')' : '—'}</td>
       <td>${formatarDataHora(u.ultimaAtividade)}</td>
     </tr>`).join('');
 }
@@ -2222,8 +2469,28 @@ window.addEventListener('resize', () => {
   prodResizeTimer = setTimeout(() => renderProdChart(ultimaProdutividade.usuarios), 150);
 });
 
+const prodExportUser = document.getElementById('prod-export-user');
+const prodTitle = document.getElementById('prod-title');
+const prodSubtitle = document.getElementById('prod-subtitle');
+
+function atualizarOpcoesDeExportacao(usuarios) {
+  if (!prodExportUser) return;
+  const atual = prodExportUser.value;
+  prodExportUser.innerHTML = '<option value="">Relatório geral (todos)</option>'
+    + usuarios.map((u) => `<option value="${escapeHtml(u.id)}">Individual: ${escapeHtml(u.username)}</option>`).join('');
+  if ([...prodExportUser.options].some((o) => o.value === atual)) prodExportUser.value = atual;
+  const wrapper = prodExportUser.closest('label') || prodExportUser;
+  wrapper.hidden = !isSystemAdmin();
+}
+
 async function carregarProdutividade() {
-  if (!panelProductivity || !isSystemAdmin()) return;
+  if (!panelProductivity || !currentAdminUser) return;
+  if (prodTitle) prodTitle.textContent = isSystemAdmin() ? 'Produtividade por administrador de categoria' : 'Minha secretaria';
+  if (prodSubtitle) {
+    prodSubtitle.textContent = isSystemAdmin()
+      ? 'Ações registradas no histórico das ocorrências: mudanças de status e atualizações de atendimento.'
+      : 'Seu desempenho nas categorias sob sua responsabilidade: ações registradas, conclusões e avaliação dos cidadãos.';
+  }
   const dias = prodPeriod ? prodPeriod.value : '30';
   showMessage(prodMessage, 'Carregando...', false);
   try {
@@ -2237,6 +2504,7 @@ async function carregarProdutividade() {
     renderProdTiles(dados.resumo);
     renderProdChart(dados.usuarios);
     renderProdTable(dados.usuarios);
+    atualizarOpcoesDeExportacao(dados.usuarios);
     showMessage(prodMessage, '', false);
   } catch (error) {
     showMessage(prodMessage, 'Não foi possível falar com o servidor.', true);
@@ -2249,12 +2517,13 @@ if (prodPeriod) prodPeriod.addEventListener('change', carregarProdutividade);
 const prodExportBtn = document.getElementById('prod-export-pdf');
 if (prodExportBtn) {
   prodExportBtn.addEventListener('click', async () => {
-    if (!ensureSystemAdminAction()) return;
+    if (!currentAdminUser) return;
     const dias = prodPeriod ? prodPeriod.value : '30';
+    const usuario = isSystemAdmin() && prodExportUser ? prodExportUser.value : '';
     prodExportBtn.disabled = true;
     showMessage(prodMessage, 'Gerando o PDF...', false);
     try {
-      const resposta = await apiAutenticada(`/api/incidentes/produtividade/pdf?dias=${encodeURIComponent(dias)}`);
+      const resposta = await apiAutenticada(`/api/incidentes/produtividade/pdf?dias=${encodeURIComponent(dias)}${usuario ? '&usuario=' + encodeURIComponent(usuario) : ''}`);
       if (!resposta.ok) {
         const corpo = await resposta.json().catch(() => ({}));
         showMessage(prodMessage, corpo.error || 'Não foi possível gerar o PDF.', true);
@@ -2566,10 +2835,22 @@ if (incidentList) {
     const item = getVisibleIncidents(getIncidents()).find((it) => it.id === select.dataset.id);
     if (!item || item.status === select.value) return;
 
+    // Concluir exige a resposta ao cidadao: e ela que vai no e-mail/WhatsApp
+    // de conclusao, em vez de uma atualizacao antiga de andamento.
+    let respostaConclusao;
+    if (select.value === 'Concluído') {
+      respostaConclusao = await pedirRespostaDeConclusao(item);
+      if (respostaConclusao === null) {
+        refreshDashboard();   // devolve o select ao status anterior
+        return;
+      }
+    }
+
     const now = new Date().toISOString();
     const previousStatus = item.status;
     const resultado = await atualizarIncidenteNoServidor(item.id, {
       status: select.value,
+      ...(respostaConclusao !== undefined ? { respostaConclusao } : {}),
       history: [
         ...(Array.isArray(item.history) ? item.history : []),
         {
@@ -2654,6 +2935,7 @@ const tabUsers = document.getElementById('tab-users');
 const tabPassword = document.getElementById('tab-password');
 const tabNotifications = document.getElementById('tab-notifications');
 const tabProductivity = document.getElementById('tab-productivity');
+const tabExecutive = document.getElementById('tab-executive');
 const panelOccurrences = document.getElementById('panel-occurrences');
 const panelCategories = document.getElementById('panel-categories');
 const panelPriorities = document.getElementById('panel-priorities');
@@ -2661,13 +2943,14 @@ const panelUsers = document.getElementById('panel-users');
 const panelPassword = document.getElementById('panel-password');
 const panelNotifications = document.getElementById('panel-notifications');
 const panelProductivity = document.getElementById('panel-productivity');
+const panelExecutive = document.getElementById('panel-executive');
 
 function switchTab(tab) {
   // reset active
-  [tabOccurrences, tabCategories, tabPriorities, tabUsers, tabPassword, tabNotifications, tabProductivity].forEach((b) => b && b.classList.remove('active'));
-  [panelOccurrences, panelCategories, panelPriorities, panelUsers, panelPassword, panelNotifications, panelProductivity].forEach((p) => p && p.classList.add('hidden'));
+  [tabOccurrences, tabCategories, tabPriorities, tabUsers, tabPassword, tabNotifications, tabProductivity, tabExecutive].forEach((b) => b && b.classList.remove('active'));
+  [panelOccurrences, panelCategories, panelPriorities, panelUsers, panelPassword, panelNotifications, panelProductivity, panelExecutive].forEach((p) => p && p.classList.add('hidden'));
 
-  if (!isSystemAdmin() && (tab === 'categories' || tab === 'priorities' || tab === 'users' || tab === 'notifications' || tab === 'productivity')) {
+  if (!isSystemAdmin() && (tab === 'categories' || tab === 'priorities' || tab === 'users' || tab === 'notifications' || tab === 'executive')) {
     tab = 'occurrences';
   }
 
@@ -2716,6 +2999,11 @@ function switchTab(tab) {
     panelProductivity.classList.remove('hidden');
     carregarProdutividade();
   }
+  if (tab === 'executive') {
+    tabExecutive.classList.add('active');
+    panelExecutive.classList.remove('hidden');
+    carregarExecutivo();
+  }
 }
 
 if (tabOccurrences) tabOccurrences.addEventListener('click', () => switchTab('occurrences'));
@@ -2725,6 +3013,7 @@ if (tabUsers) tabUsers.addEventListener('click', () => switchTab('users'));
 if (tabPassword) tabPassword.addEventListener('click', () => switchTab('password'));
 if (tabNotifications) tabNotifications.addEventListener('click', () => switchTab('notifications'));
 if (tabProductivity) tabProductivity.addEventListener('click', () => switchTab('productivity'));
+if (tabExecutive) tabExecutive.addEventListener('click', () => switchTab('executive'));
 
 if (newAdminRoleSelect) {
   newAdminRoleSelect.addEventListener('change', updateAdminRoleUi);

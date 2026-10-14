@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="robots" content="noindex" />
+    <title>Avalie o atendimento – SmartGov 360</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="container">
+      <nav class="nav">
+        <div class="brand">SmartGov 360</div>
+        <div class="nav-links">
+          <a href="index.html">Início</a>
+        </div>
+      </nav>
+    </header>
+
+    <main class="container app-shell">
+      <section class="panel avaliar-panel">
+        <div class="section-heading">
+          <p class="eyebrow">Pesquisa de satisfação</p>
+          <h2>Como foi o atendimento da sua solicitação?</h2>
+          <p id="avaliar-intro">Carregando...</p>
+        </div>
+
+        <div id="avaliar-ocorrencia" class="avaliar-ocorrencia" hidden>
+          <p><strong>Solicitação:</strong> <span id="avaliar-titulo"></span></p>
+          <p><strong>Categoria:</strong> <span id="avaliar-categoria"></span></p>
+          <p><strong>Status:</strong> <span id="avaliar-status"></span></p>
+          <div id="avaliar-resposta-wrap" hidden>
+            <p><strong>Resposta da Prefeitura:</strong></p>
+            <p id="avaliar-resposta"></p>
+          </div>
+        </div>
+
+        <form id="avaliar-form" class="form-grid" hidden>
+          <fieldset class="field full estrelas-field">
+            <legend>Dê uma nota de 1 a 5 para o atendimento</legend>
+            <div class="estrelas" role="radiogroup" aria-label="Nota">
+              <input type="radio" name="nota" id="nota-1" value="1" required /><label for="nota-1" title="Muito ruim">★</label>
+              <input type="radio" name="nota" id="nota-2" value="2" /><label for="nota-2" title="Ruim">★</label>
+              <input type="radio" name="nota" id="nota-3" value="3" /><label for="nota-3" title="Regular">★</label>
+              <input type="radio" name="nota" id="nota-4" value="4" /><label for="nota-4" title="Bom">★</label>
+              <input type="radio" name="nota" id="nota-5" value="5" /><label for="nota-5" title="Excelente">★</label>
+            </div>
+            <span id="nota-legenda" class="nota-legenda">Toque nas estrelas</span>
+          </fieldset>
+          <div class="field full">
+            <label for="comentario">O que podemos melhorar? (opcional)</label>
+            <textarea id="comentario" name="comentario" rows="4" maxlength="1000" placeholder="Conte como foi o atendimento e deixe sua sugestão."></textarea>
+          </div>
+          <div class="field full">
+            <button id="avaliar-enviar" class="btn btn-secondary" type="submit">Enviar avaliação</button>
+          </div>
+        </form>
+
+        <div id="avaliar-message" class="form-message" role="status" aria-live="polite"></div>
+        <p class="muted"><small>Sua avaliação é usada pela Prefeitura para acompanhar a qualidade do atendimento. Ela não altera o status da solicitação.</small></p>
+      </section>
+    </main>
+
+    <footer class="container footer">
+      <div class="footer-content">
+        <span>SmartGov 360 — Atendimento ao Cidadão</span>
+        <span>© <span id="year"></span></span>
+      </div>
+    </footer>
+
+    <script src="avaliar.js"></script>
+  </body>
+</html>

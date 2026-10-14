@@ -69,7 +69,7 @@ async function esperarServidor() {
   }
 
   const servidor = spawn(process.execPath, ['server.js'], {
-    cwd: RAIZ, env: { ...process.env, PORT: String(PORTA), ADMIN_INITIAL_PASSWORD: 'admin123', EMAIL_PROVIDER: 'nenhum', TWILIO_ACCOUNT_SID: 'ACteste', TWILIO_AUTH_TOKEN: 'invalido', TWILIO_WHATSAPP_FROM: '+10000000000' }, stdio: ['ignore', 'pipe', 'pipe']
+    cwd: RAIZ, env: { ...process.env, PORT: String(PORTA), ADMIN_INITIAL_PASSWORD: 'admin123', EMAIL_PROVIDER: 'nenhum', OPENAI_API_KEY: 'sk-teste', TWILIO_ACCOUNT_SID: 'ACteste', TWILIO_AUTH_TOKEN: 'invalido', TWILIO_WHATSAPP_FROM: '+10000000000' }, stdio: ['ignore', 'pipe', 'pipe']
   });
   servidor.stderr.on('data', (d) => console.log('[servidor]', d.toString().trim().slice(0, 200)));
 
@@ -245,6 +245,18 @@ async function esperarServidor() {
       const teste = await pedir('POST', '/api/auth/email/teste', { para: 'alguem@example.com' }, token);
       ok(teste.status === 207 && teste.corpo.sent === false && typeof teste.corpo.reason === 'string', 'sem provedor configurado o teste responde 207 com o motivo');
       ok(teste.corpo.provedor === 'nenhum', 'informa que nenhum provedor esta configurado');
+    }
+
+    console.log('\nFiltro de foto: envio exige a assinatura quando a IA esta ativa');
+    {
+      // Este servidor sobe com OPENAI_API_KEY de mentira: toda foto precisa do fotoToken.
+      const semToken = await pedir('POST', '/api/incidentes', { title: 'x', photoDataUrl: 'data:image/jpeg;base64,/9j/4AAQ', consentimento: { aceito: true } });
+      ok(semToken.status === 422, 'foto sem passar pelo filtro e recusada (422)');
+      const tokenErrado = await pedir('POST', '/api/incidentes', { title: 'x', photoDataUrl: 'data:image/jpeg;base64,/9j/4AAQ', fotoToken: 'abc', consentimento: { aceito: true } });
+      ok(tokenErrado.status === 422, 'assinatura invalida e recusada');
+      const semFoto = await pedir('POST', '/api/incidentes', { title: 'Sem foto', consentimento: { aceito: true } });
+      ok(semFoto.status === 201, 'sem foto nao ha o que filtrar');
+      await pedir('DELETE', '/api/incidentes', null, token);
     }
 
     console.log('\nTeste de WhatsApp');

@@ -3137,8 +3137,13 @@ if (geoRadio) {
   geoRadio.addEventListener('change', async () => {
     updateAddressMode();
     if (geoRadio.checked) {
-      await requestGeolocationPermission();
+      await obterLocalizacaoDoWizard(true);
     }
+  });
+  // A opcao ja vem marcada: clicar nela de novo nao dispara "change", mas o
+  // cidadao espera que a localizacao seja buscada. O clique forca a busca.
+  geoRadio.addEventListener('click', () => {
+    if (geoRadio.checked) obterLocalizacaoDoWizard(true);
   });
 }
 if (manualRadio) {
@@ -3577,6 +3582,18 @@ refreshDashboard();
 // =====================================================================
 // Formulario do cidadao em quatro passos (index.html)
 // =====================================================================
+// Pede a localizacao uma vez por vez: chamadas simultaneas (clique na opcao
+// + "Proximo") compartilham o mesmo pedido. Fora do formulario em passos,
+// cai no pedido direto.
+let pedidoDeLocalizacao = null;
+function obterLocalizacaoDoWizard(forcar = false) {
+  if (!geoRadio?.checked) return Promise.resolve(true);
+  if (!forcar && temCoordenadasNaSessao() && (streetInput?.value || '').trim()) return Promise.resolve(true);
+  if (pedidoDeLocalizacao) return pedidoDeLocalizacao;
+  pedidoDeLocalizacao = requestGeolocationPermission().finally(() => { pedidoDeLocalizacao = null; });
+  return pedidoDeLocalizacao;
+}
+
 function temCoordenadasNaSessao() {
   const lat = sessionStorage.getItem('smartgov360-last-latitude');
   const lng = sessionStorage.getItem('smartgov360-last-longitude');
@@ -3638,6 +3655,8 @@ function irParaPasso(n) {
   if (contador) contador.textContent = `Passo ${passoAtual} de 4`;
   showMessage(formMessage, '', false);
   if (passoAtual === 4) preencherResumoDoWizard();
+  // Ao chegar no passo 2 com "Usar minha localizacao", a busca comeca sozinha.
+  if (passoAtual === 2) obterLocalizacaoDoWizard();
   document.getElementById('registrar')?.scrollIntoView({ block: 'start', behavior: 'smooth' });
 }
 
@@ -3692,7 +3711,19 @@ function validarPassoDoWizard(n) {
 }
 
 document.querySelectorAll('[data-next]').forEach((btn) => {
-  btn.addEventListener('click', () => {
+  btn.addEventListener('click', async () => {
+    // No passo 2 com localizacao automatica, "Proximo" busca a localizacao
+    // (se ainda nao veio) antes de validar o endereco.
+    if (passoAtual === 2 && geoRadio?.checked && !(temCoordenadasNaSessao() && (streetInput?.value || '').trim())) {
+      btn.disabled = true;
+      showMessage(formMessage, 'Obtendo sua localização... autorize o acesso se o navegador perguntar.', false);
+      const ok = await obterLocalizacaoDoWizard();
+      btn.disabled = false;
+      if (!ok) {
+        showMessage(formMessage, 'Não foi possível obter sua localização. Autorize o acesso ou escolha "Informar o endereço".', true);
+        return;
+      }
+    }
     const erro = validarPassoDoWizard(passoAtual);
     if (erro) {
       showMessage(formMessage, erro.mensagem, true);

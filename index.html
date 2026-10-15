@@ -48,32 +48,64 @@
             <h2>Registrar uma ocorrência</h2>
             <p>Preencha as informações abaixo. É rápido e simples.</p>
           </div>
-          <span class="passo-contador" id="passo-contador">Passo 1 de 4</span>
+          <span class="passo-contador" id="passo-contador">Passo 1 de 5</span>
         </div>
 
         <ol class="stepper" id="wizard-stepper">
-          <li class="ativo" data-step="1"><span>1</span>Categoria</li>
-          <li data-step="2"><span>2</span>Localização</li>
-          <li data-step="3"><span>3</span>Detalhes</li>
-          <li data-step="4"><span>4</span>Enviar</li>
+          <li class="ativo" data-step="1"><span>1</span>Foto</li>
+          <li data-step="2"><span>2</span>Categoria</li>
+          <li data-step="3"><span>3</span>Localização</li>
+          <li data-step="4"><span>4</span>Detalhes</li>
+          <li data-step="5"><span>5</span>Enviar</li>
         </ol>
 
         <form id="occurrence-form" novalidate>
-          <!-- Passo 1: categoria -->
+          <!-- Passo 1: foto + analise -->
           <section class="wizard-step" data-step="1">
-            <h3>Qual é o problema?</h3>
-            <p class="passo-ajuda">Selecione a categoria que melhor descreve a sua ocorrência.</p>
-            <div id="category-grid" class="grade-categorias" role="radiogroup" aria-label="Categoria"></div>
-            <input type="hidden" id="category" name="category" value="" />
-            <input type="hidden" id="priority" name="priority" value="" />
+            <h3>Tire ou envie uma foto do problema</h3>
+            <p class="passo-ajuda">A foto é analisada na hora: verificamos se mostra um problema urbano e já sugerimos a categoria, o título e a descrição.</p>
+
+            <div class="field">
+              <div class="photo-controls">
+                <input id="photo" name="photo" type="file" accept="image/*" required />
+                <button type="button" id="camera-open" class="btn btn-secondary photo-camera-button">
+                  <span aria-hidden="true">📷</span> Tirar foto com a câmera
+                </button>
+              </div>
+              <input id="photo-camera-fallback" type="file" accept="image/*" capture="environment" hidden />
+              <div id="photo-preview" class="photo-preview" hidden>
+                <img id="photo-preview-img" alt="Pré-visualização da foto selecionada" />
+                <div class="photo-preview-info">
+                  <span id="photo-preview-name"></span>
+                  <button type="button" id="photo-remove" class="btn btn-ghost photo-remove-button">Remover foto</button>
+                </div>
+              </div>
+              <span id="photo-message" class="form-message" role="status" aria-live="polite"></span>
+            </div>
+
+            <div id="photo-analysis" class="analise-foto" hidden aria-live="polite"></div>
+
             <div class="wizard-acoes">
               <span></span>
               <button type="button" class="btn-azul" data-next>Próximo <span aria-hidden="true">→</span></button>
             </div>
           </section>
 
-          <!-- Passo 2: localizacao -->
+          <!-- Passo 2: categoria -->
           <section class="wizard-step" data-step="2" hidden>
+            <h3>Qual é o problema?</h3>
+            <p class="passo-ajuda" id="categoria-ajuda">Selecione a categoria que melhor descreve a sua ocorrência.</p>
+            <div id="category-grid" class="grade-categorias" role="radiogroup" aria-label="Categoria"></div>
+            <input type="hidden" id="category" name="category" value="" />
+            <input type="hidden" id="priority" name="priority" value="" />
+            <div class="wizard-acoes">
+              <button type="button" class="btn-link" data-prev><span aria-hidden="true">←</span> Voltar</button>
+              <button type="button" class="btn-azul" data-next>Próximo <span aria-hidden="true">→</span></button>
+            </div>
+          </section>
+
+          <!-- Passo 3: localizacao -->
+          <section class="wizard-step" data-step="3" hidden>
             <h3>Onde está o problema?</h3>
             <p class="passo-ajuda">Use a sua localização ou informe o endereço. Confira sempre o número.</p>
 
@@ -132,10 +164,10 @@
             </div>
           </section>
 
-          <!-- Passo 3: detalhes -->
-          <section class="wizard-step" data-step="3" hidden>
-            <h3>Conte mais detalhes</h3>
-            <p class="passo-ajuda">Descreva o problema e envie uma foto do local.</p>
+          <!-- Passo 4: detalhes -->
+          <section class="wizard-step" data-step="4" hidden>
+            <h3>Confira os detalhes</h3>
+            <p class="passo-ajuda" id="detalhes-ajuda">Título e descrição foram preenchidos a partir da foto. Ajuste como quiser.</p>
 
             <div class="field">
               <label for="title">Título da ocorrência</label>
@@ -147,43 +179,23 @@
               <span class="contador" id="description-count">0/500</span>
             </div>
 
-            <div class="field">
-              <label for="photo">Foto <small>(obrigatório pelo menos 1 foto)</small></label>
-              <div class="photo-controls">
-                <input id="photo" name="photo" type="file" accept="image/*" required />
-                <button type="button" id="camera-open" class="btn btn-secondary photo-camera-button">
-                  <span aria-hidden="true">📷</span> Tirar foto com a câmera
-                </button>
-              </div>
-              <input id="photo-camera-fallback" type="file" accept="image/*" capture="environment" hidden />
-              <div id="photo-preview" class="photo-preview" hidden>
-                <img id="photo-preview-img" alt="Pré-visualização da foto selecionada" />
-                <div class="photo-preview-info">
-                  <span id="photo-preview-name"></span>
-                  <button type="button" id="photo-remove" class="btn btn-ghost photo-remove-button">Remover foto</button>
-                </div>
-              </div>
-              <span id="photo-message" class="form-message" role="status" aria-live="polite"></span>
-              <p class="passo-ajuda">A foto passa por uma verificação automática: imagens sem relação com um problema urbano não são aceitas.</p>
-            </div>
-
             <div class="wizard-acoes">
               <button type="button" class="btn-link" data-prev><span aria-hidden="true">←</span> Voltar</button>
               <button type="button" class="btn-azul" data-next>Próximo <span aria-hidden="true">→</span></button>
             </div>
           </section>
 
-          <!-- Passo 4: confirmar e enviar -->
-          <section class="wizard-step" data-step="4" hidden>
+          <!-- Passo 5: confirmar e enviar -->
+          <section class="wizard-step" data-step="5" hidden>
             <h3>Confirme e envie</h3>
             <p class="passo-ajuda">Verifique as informações antes de registrar.</p>
 
             <dl class="resumo-envio">
+              <div><dt>Foto</dt><dd><img id="summary-photo" class="resumo-foto" alt="Foto da ocorrência" hidden /><span id="summary-photo-none">Sem foto</span></dd></div>
               <div><dt>Categoria</dt><dd id="summary-category">—</dd></div>
               <div><dt>Endereço</dt><dd id="summary-address">—</dd></div>
               <div><dt>Título</dt><dd id="summary-title">—</dd></div>
               <div><dt>Descrição</dt><dd id="summary-description">—</dd></div>
-              <div><dt>Foto</dt><dd><img id="summary-photo" class="resumo-foto" alt="Foto da ocorrência" hidden /><span id="summary-photo-none">Sem foto</span></dd></div>
             </dl>
 
             <h4 class="subtitulo">Seus dados para contato</h4>
@@ -221,7 +233,7 @@
                 Enviar ocorrência
               </button>
             </div>
-            <span id="submit-loading" class="loading-indicator hidden">Verificando a foto e registrando a ocorrência...</span>
+            <span id="submit-loading" class="loading-indicator hidden">Registrando a ocorrência...</span>
           </section>
         </form>
 

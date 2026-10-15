@@ -252,7 +252,7 @@
   margin: 0 0 1.2rem;
   padding: 0;
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(5, 1fr);
   position: relative;
 }
 
@@ -260,8 +260,8 @@
   content: "";
   position: absolute;
   top: 15px;
-  left: 12.5%;
-  right: 12.5%;
+  left: 10%;
+  right: 10%;
   height: 2px;
   background: var(--borda);
 }
@@ -301,6 +301,63 @@
   background: var(--azul-claro);
   border-color: var(--azul);
   color: var(--azul);
+}
+
+/* analise da foto pela IA */
+.analise-foto {
+  display: flex;
+  gap: 0.8rem;
+  align-items: flex-start;
+  padding: 0.9rem 1rem;
+  border-radius: 12px;
+  border: 1px solid var(--azul-borda);
+  background: var(--azul-claro);
+  margin-bottom: 1rem;
+  font-size: 0.93rem;
+}
+
+.analise-foto.ok {
+  border-color: #bfe6cf;
+  background: #eaf8ef;
+}
+
+.analise-foto.erro {
+  border-color: #f2c2c2;
+  background: #fdf0f0;
+}
+
+.analise-foto .analise-icone {
+  flex-shrink: 0;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: #fff;
+  color: var(--azul);
+}
+
+.analise-foto.ok .analise-icone { color: var(--verde-ok); }
+.analise-foto.erro .analise-icone { color: #c0392b; }
+
+.analise-foto strong {
+  display: block;
+  margin-bottom: 0.15rem;
+}
+
+.analise-foto .sugestao {
+  margin: 0.35rem 0 0;
+  color: var(--cinza-texto);
+}
+
+.analise-foto .sugestao b {
+  color: var(--tinta);
+  font-weight: 600;
+}
+
+@keyframes girar { to { transform: rotate(360deg); } }
+.analise-foto.analisando .analise-icone svg {
+  animation: girar 1s linear infinite;
 }
 
 /* ---------- passos ---------- */

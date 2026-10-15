@@ -1642,6 +1642,7 @@ function setPhotoFile(file) {
   }
   showPhotoPreview(file);
   showMessage(photoMessage, '', false);
+  document.dispatchEvent(new CustomEvent('foto-selecionada', { detail: { file } }));
 }
 
 function clearPhotoFile() {
@@ -1652,6 +1653,7 @@ function clearPhotoFile() {
   }
   if (photoCameraFallback) photoCameraFallback.value = '';
   showPhotoPreview(null);
+  document.dispatchEvent(new CustomEvent('foto-removida'));
 }
 
 function stopCameraStream() {
@@ -1859,6 +1861,7 @@ if (photoInput) {
     photoInput.required = true;
     showPhotoPreview(file || null);
     if (file) showMessage(photoMessage, '', false);
+    document.dispatchEvent(new CustomEvent(file ? 'foto-selecionada' : 'foto-removida', { detail: { file } }));
   });
 }
 
@@ -2002,12 +2005,12 @@ if (occurrenceForm) {
       title = updatedFormData.get('title');
 
       const fotoOriginal = getSelectedPhotoFile();
-      const photoFile = fotoOriginal ? await reduzirFoto(fotoOriginal) : null;
-      if (fotoOriginal && photoFile !== fotoOriginal) {
-        console.debug('[foto] reduzida de', fotoOriginal.size, 'para', photoFile.size, 'bytes');
-      }
-      let imgResult = null;
-      if (photoFile) {
+      // Se a foto ja foi analisada no passo 1 (e nao mudou), reaproveita o
+      // resultado e a assinatura em vez de chamar a IA de novo.
+      const analisePronta = fotoOriginal && analiseDaFoto && analiseDaFoto.assinatura === assinaturaDoArquivo(fotoOriginal) ? analiseDaFoto : null;
+      const photoFile = analisePronta ? fotoOriginal : (fotoOriginal ? await reduzirFoto(fotoOriginal) : null);
+      let imgResult = analisePronta ? analisePronta.resultado : null;
+      if (photoFile && !analisePronta) {
         imgResult = await classifyImage(photoFile);
       }
 
@@ -3635,6 +3638,7 @@ function dataCurta(iso) {
   return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString('pt-BR') + ' - ' + d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 }
 
+const TOTAL_PASSOS = 5;
 const wizardStepper = document.getElementById('wizard-stepper');
 const wizardSteps = Array.from(document.querySelectorAll('.wizard-step'));
 const wizardSuccess = document.getElementById('wizard-success');
@@ -3642,7 +3646,7 @@ const categoryGrid = document.getElementById('category-grid');
 let passoAtual = 1;
 
 function irParaPasso(n) {
-  passoAtual = Math.max(1, Math.min(4, n));
+  passoAtual = Math.max(1, Math.min(TOTAL_PASSOS, n));
   wizardSteps.forEach((sec) => { sec.hidden = Number(sec.dataset.step) !== passoAtual; });
   if (wizardStepper) {
     wizardStepper.querySelectorAll('li').forEach((li) => {
@@ -3652,11 +3656,12 @@ function irParaPasso(n) {
     });
   }
   const contador = document.getElementById('passo-contador');
-  if (contador) contador.textContent = `Passo ${passoAtual} de 4`;
+  if (contador) contador.textContent = `Passo ${passoAtual} de ${TOTAL_PASSOS}`;
   showMessage(formMessage, '', false);
-  if (passoAtual === 4) preencherResumoDoWizard();
-  // Ao chegar no passo 2 com "Usar minha localizacao", a busca comeca sozinha.
-  if (passoAtual === 2) obterLocalizacaoDoWizard();
+  if (passoAtual === 2) marcarCategoriaSugerida();
+  if (passoAtual === 3) obterLocalizacaoDoWizard();
+  if (passoAtual === 4) preencherDetalhesSugeridos();
+  if (passoAtual === 5) preencherResumoDoWizard();
   document.getElementById('registrar')?.scrollIntoView({ block: 'start', behavior: 'smooth' });
 }
 
@@ -3687,10 +3692,16 @@ if (categoryGrid) {
 // Validacao de cada passo antes de avancar. Devolve a mensagem de erro ou null.
 function validarPassoDoWizard(n) {
   if (n === 1) {
-    if (!categoryInput?.value) return { mensagem: 'Escolha a categoria do problema.' };
+    if (!getSelectedPhotoFile()) return { mensagem: 'Envie uma foto do problema: anexe um arquivo ou tire uma foto com a câmera.', campo: photoInput };
+    if (analiseEmAndamento) return { mensagem: 'Aguarde a análise da foto terminar.' };
+    if (analiseDaFoto?.rejeitada) return { mensagem: analiseDaFoto.motivo || 'A foto não foi aceita. Envie outra foto do problema.' };
     return null;
   }
   if (n === 2) {
+    if (!categoryInput?.value) return { mensagem: 'Escolha a categoria do problema.' };
+    return null;
+  }
+  if (n === 3) {
     if (geoRadio?.checked && !temCoordenadasNaSessao()) {
       return { mensagem: 'Clique em "Usar minha localização" e autorize o acesso, ou escolha "Informar o endereço".' };
     }
@@ -3701,20 +3712,155 @@ function validarPassoDoWizard(n) {
     }
     return null;
   }
-  if (n === 3) {
+  if (n === 4) {
     const desc = document.getElementById('description');
     if (desc && desc.value.trim().length < 10) return { mensagem: 'Descreva o problema com pelo menos 10 caracteres.', campo: desc };
-    if (!getSelectedPhotoFile()) return { mensagem: 'Envie uma foto do problema: anexe um arquivo ou tire uma foto com a câmera.', campo: photoInput };
     return null;
   }
   return null;
+}
+
+// ---------- analise da foto no passo 1 ----------
+let analiseDaFoto = null;       // { assinatura, resultado, rejeitada, motivo }
+let analiseEmAndamento = false;
+const photoAnalysis = document.getElementById('photo-analysis');
+const ICONE_ANALISE = {
+  analisando: '<svg viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 9 9"/></svg>',
+  ok: '<svg viewBox="0 0 24 24"><path d="M5 12.5l4 4 10-10"/></svg>',
+  erro: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16v.5"/></svg>',
+  info: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8v.5"/></svg>'
+};
+
+function assinaturaDoArquivo(file) {
+  return file ? [file.size, file.name, file.lastModified, file.type].join(':') : '';
+}
+
+function mostrarAnalise(estado, titulo, texto, sugestao) {
+  if (!photoAnalysis) return;
+  photoAnalysis.hidden = false;
+  photoAnalysis.className = 'analise-foto ' + estado;
+  photoAnalysis.innerHTML = `<span class="analise-icone">${ICONE_ANALISE[estado] || ICONE_ANALISE.info}</span><div><strong>${escapeHtml(titulo)}</strong>${texto ? escapeHtml(texto) : ''}${sugestao || ''}</div>`;
+}
+
+async function analisarFotoDoWizard() {
+  if (!photoAnalysis) return;
+  const file = getSelectedPhotoFile();
+  if (!file) return;
+  const assinaturaOriginal = assinaturaDoArquivo(file);
+  analiseEmAndamento = true;
+  analiseDaFoto = null;
+  mostrarAnalise('analisando', 'Analisando a foto...', 'Verificamos se a imagem mostra um problema urbano e preparamos as sugestões. Leva alguns segundos.');
+  const botaoProximo = document.querySelector('[data-step="1"] [data-next]');
+  if (botaoProximo) botaoProximo.disabled = true;
+
+  try {
+    const reduzida = await reduzirFoto(file);
+    // A foto que fica no formulario e a reduzida: a assinatura do filtro vale
+    // para estes bytes, e o envio nao precisa reduzir nem analisar de novo.
+    if (reduzida !== file) setPhotoFileSemAviso(reduzida);
+    const atual = getSelectedPhotoFile();
+    const resultado = await classifyImage(atual);
+    // O cidadao pode ter trocado a foto durante a analise.
+    if (assinaturaDoArquivo(getSelectedPhotoFile()) !== assinaturaDoArquivo(atual)) return;
+
+    if (resultado?.rejeitada) {
+      analiseDaFoto = { assinatura: assinaturaDoArquivo(atual), rejeitada: true, motivo: resultado.motivo };
+      mostrarAnalise('erro', 'Foto não aceita', resultado.motivo + ' Envie outra foto do local.');
+      return;
+    }
+    if (!resultado) {
+      analiseDaFoto = { assinatura: assinaturaDoArquivo(atual), resultado: null };
+      mostrarAnalise('info', 'Foto recebida', 'A análise automática não está disponível agora. Você pode continuar e preencher a categoria e a descrição manualmente.');
+      return;
+    }
+    analiseDaFoto = { assinatura: assinaturaDoArquivo(atual), resultado };
+    const partes = [];
+    if (resultado.category) partes.push(`Categoria: <b>${escapeHtml(resultado.category)}</b>`);
+    if (resultado.title) partes.push(`Título: <b>${escapeHtml(resultado.title)}</b>`);
+    mostrarAnalise('ok', 'Foto verificada', 'Ela mostra um problema urbano. Nos próximos passos você confere as sugestões e pode alterá-las.', partes.length ? `<p class="sugestao">${partes.join(' · ')}</p>` : '');
+    // Sugestoes entram agora; o cidadao ajusta nos passos seguintes.
+    if (categoryInput && resultado.category) categoryInput.value = resultado.category;
+    if (priorityInput && resultado.priority) priorityInput.value = resultado.priority;
+    preencherDetalhesSugeridos();
+  } catch (error) {
+    console.warn('[foto] analise falhou:', error);
+    analiseDaFoto = { assinatura: assinaturaOriginal, resultado: null };
+    mostrarAnalise('info', 'Foto recebida', 'Não foi possível analisar a imagem agora. Você pode continuar normalmente.');
+  } finally {
+    analiseEmAndamento = false;
+    if (botaoProximo) botaoProximo.disabled = false;
+  }
+}
+
+// Troca a foto do input sem disparar nova analise.
+function setPhotoFileSemAviso(file) {
+  const original = document.dispatchEvent;
+  document.dispatchEvent = () => true;
+  try {
+    setPhotoFile(file);
+  } finally {
+    document.dispatchEvent = original;
+  }
+}
+
+document.addEventListener('foto-selecionada', () => { analisarFotoDoWizard(); });
+document.addEventListener('foto-removida', () => {
+  analiseDaFoto = null;
+  analiseEmAndamento = false;
+  if (photoAnalysis) { photoAnalysis.hidden = true; photoAnalysis.innerHTML = ''; }
+  const botaoProximo = document.querySelector('[data-step="1"] [data-next]');
+  if (botaoProximo) botaoProximo.disabled = false;
+});
+
+// Marca no grid a categoria sugerida pela IA (ou a ja escolhida).
+function marcarCategoriaSugerida() {
+  if (!categoryGrid) return;
+  const alvo = (categoryInput?.value || '').toLowerCase();
+  let marcou = false;
+  categoryGrid.querySelectorAll('.categoria-opcao').forEach((b) => {
+    const igual = alvo && b.dataset.categoria.toLowerCase() === alvo;
+    b.setAttribute('aria-checked', igual ? 'true' : 'false');
+    if (igual) marcou = true;
+  });
+  if (!marcou && categoryInput) categoryInput.value = '';
+  const ajuda = document.getElementById('categoria-ajuda');
+  if (ajuda) {
+    ajuda.textContent = marcou && analiseDaFoto?.resultado?.category
+      ? 'Sugerimos a categoria com base na foto. Se não for essa, escolha outra.'
+      : 'Selecione a categoria que melhor descreve a sua ocorrência.';
+  }
+}
+
+// Preenche titulo e descricao com as sugestoes, sem apagar o que o cidadao
+// ja escreveu por conta propria.
+let sugestaoTitulo = '';
+let sugestaoDescricao = '';
+function preencherDetalhesSugeridos() {
+  const r = analiseDaFoto?.resultado;
+  const titulo = document.getElementById('title');
+  const desc = document.getElementById('description');
+  const ajuda = document.getElementById('detalhes-ajuda');
+  if (!r) {
+    if (ajuda) ajuda.textContent = 'Dê um título e descreva o problema.';
+    return;
+  }
+  if (titulo && r.title && (!titulo.value.trim() || titulo.value === sugestaoTitulo)) {
+    titulo.value = r.title;
+    sugestaoTitulo = r.title;
+  }
+  if (desc && r.description && (!desc.value.trim() || desc.value === sugestaoDescricao)) {
+    desc.value = r.description;
+    sugestaoDescricao = r.description;
+    desc.dispatchEvent(new Event('input'));
+  }
+  if (ajuda) ajuda.textContent = 'Título e descrição foram preenchidos a partir da foto. Ajuste como quiser.';
 }
 
 document.querySelectorAll('[data-next]').forEach((btn) => {
   btn.addEventListener('click', async () => {
     // No passo 2 com localizacao automatica, "Proximo" busca a localizacao
     // (se ainda nao veio) antes de validar o endereco.
-    if (passoAtual === 2 && geoRadio?.checked && !(temCoordenadasNaSessao() && (streetInput?.value || '').trim())) {
+    if (passoAtual === 3 && geoRadio?.checked && !(temCoordenadasNaSessao() && (streetInput?.value || '').trim())) {
       btn.disabled = true;
       showMessage(formMessage, 'Obtendo sua localização... autorize o acesso se o navegador perguntar.', false);
       const ok = await obterLocalizacaoDoWizard();

@@ -56,14 +56,31 @@ function comparavel(valor) {
 function criarIncidentes({ diretorioDados, papelAdminSistema }) {
   const ARQUIVO = path.join(diretorioDados, 'incidentes.json');
 
+  const PRIMEIRO_PROTOCOLO = 1001;
+
   function ler() {
+    let lista;
     try {
-      const lista = JSON.parse(fs.readFileSync(ARQUIVO, 'utf8'));
+      lista = JSON.parse(fs.readFileSync(ARQUIVO, 'utf8'));
       if (!Array.isArray(lista)) return [];
-      return lista.map((item) => (item && typeof item === 'object' ? { ...item, status: normalizarStatus(item.status) || STATUS_INICIAL } : item));
     } catch (error) {
       return [];
     }
+    lista = lista.map((item) => (item && typeof item === 'object' ? { ...item, status: normalizarStatus(item.status) || STATUS_INICIAL } : item));
+
+    // Ocorrencias anteriores ao protocolo recebem um numero na ordem de abertura.
+    if (lista.some((item) => item && !Number.isInteger(item.protocolo))) {
+      let proximo = Math.max(PRIMEIRO_PROTOCOLO - 1, ...lista.map((item) => Number(item?.protocolo) || 0)) + 1;
+      const semProtocolo = lista.filter((item) => item && !Number.isInteger(item.protocolo))
+        .sort((a, b) => Date.parse(a.createdAt || 0) - Date.parse(b.createdAt || 0));
+      for (const item of semProtocolo) item.protocolo = proximo++;
+      salvar(lista);
+    }
+    return lista;
+  }
+
+  function proximoProtocolo(lista) {
+    return Math.max(PRIMEIRO_PROTOCOLO - 1, ...lista.map((item) => Number(item?.protocolo) || 0)) + 1;
   }
 
   function salvar(lista) {
@@ -109,8 +126,10 @@ function criarIncidentes({ diretorioDados, papelAdminSistema }) {
 
     const historico = Array.isArray(corpo.history) ? corpo.history.slice(0, 50) : [];
 
+    const lista = ler();
     const novo = {
       id: crypto.randomUUID(),
+      protocolo: proximoProtocolo(lista),
       name: texto(corpo.name),
       email: texto(corpo.email),
       phone: texto(corpo.phone),
@@ -145,7 +164,6 @@ function criarIncidentes({ diretorioDados, papelAdminSistema }) {
       createdAt: new Date().toISOString()
     };
 
-    const lista = ler();
     lista.unshift(novo);
     salvar(lista);
     return { incidente: novo };
@@ -198,6 +216,55 @@ function criarIncidentes({ diretorioDados, papelAdminSistema }) {
     lista[indice] = { ...atual, ...mudancas, updatedAt: new Date().toISOString() };
     salvar(lista);
     return { incidente: lista[indice] };
+  }
+
+  // ------------------------------------------------ acompanhamento publico
+  //
+  // Pelo numero do protocolo qualquer pessoa ve o andamento, sem dados
+  // pessoais nem a foto: titulo, categoria, local aproximado, status e datas.
+  function publico(item) {
+    const historico = Array.isArray(item.history) ? item.history : [];
+    const etapas = historico
+      .filter((h) => h && h.type === 'status' && /para (.+)$/.test(h.text || ''))
+      .map((h) => ({ status: normalizarStatus((h.text.match(/para (.+)$/) || [])[1]), at: h.at }))
+      .filter((e) => STATUS_VALIDOS.includes(e.status));
+    return {
+      protocolo: item.protocolo,
+      title: item.title,
+      category: item.category,
+      status: item.status,
+      createdAt: item.createdAt,
+      concluidoEm: item.concluidoEm || '',
+      street: item.street,
+      neighborhood: item.neighborhood,
+      city: item.city,
+      state: item.state,
+      description: item.description,
+      respostaConclusao: item.respostaConclusao || '',
+      avaliada: Boolean(item.avaliacao),
+      nota: item.avaliacao?.nota ?? null,
+      etapas
+    };
+  }
+
+  function consultarProtocolo(numero) {
+    const n = Number((numero || '').toString().replace(/\D/g, ''));
+    if (!Number.isInteger(n) || n < 1) return { erro: 'Informe o número do protocolo.', status: 400 };
+    const item = ler().find((i) => i.protocolo === n);
+    if (!item) return { erro: 'Protocolo não encontrado. Confira o número no e-mail que você recebeu.', status: 404 };
+    return { ocorrencia: publico(item) };
+  }
+
+  function recentes(limite = 6) {
+    return ler().slice(0, limite).map((item) => ({
+      protocolo: item.protocolo,
+      title: item.title,
+      category: item.category,
+      status: item.status,
+      neighborhood: item.neighborhood,
+      city: item.city,
+      createdAt: item.createdAt
+    }));
   }
 
   // ------------------------------------------------ pesquisa de satisfacao
@@ -464,7 +531,7 @@ function criarIncidentes({ diretorioDados, papelAdminSistema }) {
 
   return {
     listar, criar, atualizar, remover, limpar, produtividade, visaoExecutiva,
-    consultarAvaliacao, registrarAvaliacao,
+    consultarAvaliacao, registrarAvaliacao, consultarProtocolo, recentes,
     CAMPOS_EDITAVEIS, STATUS_VALIDOS, VERSAO_CONSENTIMENTO
   };
 }

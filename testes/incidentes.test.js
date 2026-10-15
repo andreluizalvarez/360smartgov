@@ -134,12 +134,29 @@ async function esperarServidor() {
       buraco = r1.corpo.incidente;
       ok(buraco.id !== 'forjado' && buraco.status === 'Recebido', 'id e status iniciais sao definidos pelo servidor');
       ok(buraco.photoDataUrl.startsWith('data:image/jpeg'), 'a foto e guardada');
+      ok(buraco.protocolo === 1001, 'a primeira ocorrencia recebe o protocolo 1001');
 
       const r2 = await pedir('POST', '/api/incidentes', {
         title: 'Poste apagado', category: 'Iluminação pública', priority: 'Alta', description: 'Sem luz', consentimento: { aceito: true }
       });
       poste = r2.corpo.incidente;
       ok(r2.status === 201 && poste.id, 'segunda ocorrencia gravada');
+      ok(poste.protocolo === 1002, 'o protocolo e sequencial');
+
+      console.log('\nAcompanhamento publico por protocolo');
+      {
+        const nada = await pedir('GET', '/api/protocolo/999999');
+        ok(nada.status === 404, 'protocolo inexistente responde 404');
+        const invalido = await pedir('GET', '/api/protocolo/abc');
+        ok(invalido.status === 400, 'protocolo sem numero responde 400');
+        const consulta = await pedir('GET', '/api/protocolo/1001');
+        ok(consulta.status === 200 && consulta.corpo.ocorrencia.title === 'Buraco na via' && consulta.corpo.ocorrencia.status === 'Recebido', 'consulta publica devolve titulo e status');
+        const o = consulta.corpo.ocorrencia;
+        ok(o.name === undefined && o.email === undefined && o.phone === undefined && o.photoDataUrl === undefined && o.avaliacaoToken === undefined, 'sem dados pessoais, foto ou token de avaliacao');
+        const recentes = await pedir('GET', '/api/incidentes/recentes');
+        ok(recentes.status === 200 && recentes.corpo.incidentes.length === 2 && recentes.corpo.incidentes[0].protocolo === 1002, 'recentes lista as ultimas, mais nova primeiro');
+        ok(recentes.corpo.incidentes[0].photoDataUrl === undefined && recentes.corpo.incidentes[0].name === undefined, 'recentes sem foto nem dados pessoais');
+      }
 
       const fotoInvalida = await pedir('POST', '/api/incidentes', { title: 'x', photoDataUrl: 'http://evil/x.jpg', consentimento: { aceito: true } });
       ok(fotoInvalida.status === 400, 'foto que nao e data URL de imagem e recusada');
@@ -183,10 +200,12 @@ async function esperarServidor() {
 
       const propria = await pedir('PUT', '/api/incidentes/' + buraco.id, {
         status: 'Em andamento',
-        history: [{ id: 'h1', type: 'status', text: 'Status alterado', by: 'operador', at: new Date().toISOString() }]
+        history: [{ id: 'h1', type: 'status', text: 'Status alterado de Recebido para Em andamento', by: 'operador', at: new Date().toISOString() }]
       }, tokenOperador);
       ok(propria.status === 200 && propria.corpo.incidente.status === 'Em andamento', 'altera o status da propria categoria');
       ok(propria.corpo.incidente.history.length === 1, 'o historico enviado e guardado');
+      const etapas = (await pedir('GET', '/api/protocolo/1001')).corpo.ocorrencia.etapas;
+      ok(etapas.length === 1 && etapas[0].status === 'Em andamento' && etapas[0].at, 'o acompanhamento publico mostra a etapa com data');
 
       const removerOutra = await pedir('DELETE', '/api/incidentes/' + poste.id, null, tokenOperador);
       ok(removerOutra.status === 403, 'nao remove ocorrencia de outra categoria');

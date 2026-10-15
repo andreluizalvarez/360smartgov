@@ -341,6 +341,8 @@ function buildNotificationText(eventType, incident, actor, previousStatus, newSt
   const status = incident?.status || newStatus || 'Não informado';
   const address = incident?.address || [incident?.street, incident?.number, incident?.neighborhood, incident?.city, incident?.state].filter(Boolean).join(', ') || 'Não informado';
   const citizenName = primeiroNome(incident?.name);
+  const protocolo = Number.isInteger(incident?.protocolo) ? `#${incident.protocolo}` : '';
+  const linhaProtocolo = protocolo ? [`Protocolo: ${protocolo}`, ''] : [];
 
   if (eventType === 'status_changed') {
     const toStatus = newStatus || status;
@@ -372,7 +374,8 @@ function buildNotificationText(eventType, incident, actor, previousStatus, newSt
           respostaDaPrefeitura,
           '',
           'Agradecemos sua participação. Sua colaboração ajuda a Prefeitura a identificar problemas e melhorar os serviços da cidade.',
-          ...(linkAvaliacao ? ['', 'Avalie o atendimento e deixe sua sugestão (leva menos de um minuto):', linkAvaliacao] : [])
+          ...(linkAvaliacao ? ['', 'Avalie o atendimento e deixe sua sugestão (leva menos de um minuto):', linkAvaliacao] : []),
+          ...(protocolo ? ['', `Acompanhe pelo protocolo ${protocolo} em ${SITE_URL}/index.html?protocolo=${incident.protocolo}`] : [])
         ]
       }
     };
@@ -395,6 +398,7 @@ function buildNotificationText(eventType, incident, actor, previousStatus, newSt
         '',
         modelo.abertura,
         '',
+        ...linhaProtocolo,
         `Solicitação: ${title}`,
         '',
         `Local: ${local}`,
@@ -418,6 +422,7 @@ function buildNotificationText(eventType, incident, actor, previousStatus, newSt
       '',
       'Sua solicitação foi recebida com sucesso pela Prefeitura.',
       '',
+      ...linhaProtocolo,
       `Solicitação: ${title}`,
       '',
       `Categoria: ${category}`,
@@ -432,7 +437,7 @@ function buildNotificationText(eventType, incident, actor, previousStatus, newSt
       '',
       ...ASSINATURA_EMAIL
     ].join('\n'),
-    whatsappText: `Olá, ${citizenName}! Sua solicitação "${title}" foi recebida com sucesso pela Prefeitura. Categoria: ${category}. Local: ${local}. Status: ${status}. Você será informado sempre que houver uma atualização. ${PREFEITURA_NOME} – SmartGov 360.`
+    whatsappText: `Olá, ${citizenName}! Sua solicitação "${title}"${protocolo ? ' (protocolo ' + protocolo + ')' : ''} foi recebida com sucesso pela Prefeitura. Categoria: ${category}. Local: ${local}. Status: ${status}. Você será informado sempre que houver uma atualização. ${PREFEITURA_NOME} – SmartGov 360.`
   };
 }
 
@@ -1180,6 +1185,17 @@ app.post('/api/incidentes/executivo/resumo', auth.exigirAdminSistema, async (req
   } catch (error) {
     return res.status(502).json({ error: 'Falha ao gerar o resumo: ' + error.message });
   }
+});
+
+// ------------------------------------------------ acompanhamento publico
+app.get('/api/protocolo/:numero', (req, res) => {
+  const resultado = incidentes.consultarProtocolo(req.params.numero);
+  if (resultado.erro) return res.status(resultado.status).json({ error: resultado.erro });
+  return res.json(resultado);
+});
+
+app.get('/api/incidentes/recentes', (req, res) => {
+  return res.json({ incidentes: incidentes.recentes(6) });
 });
 
 // ------------------------------------------------ pesquisa de satisfacao (publica)

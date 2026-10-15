@@ -3,87 +3,97 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>SmartGov 360 | Plataforma de Ocorrências Municipais</title>
-    <meta name="description" content="Aplicação completa para cadastro de ocorrências urbanas e painel administrativo do município." />
+    <title>SmartGov 360 | Registre um problema na sua cidade</title>
+    <meta name="description" content="Registre problemas urbanos com foto e localização, acompanhe pelo número de protocolo e receba as atualizações da Prefeitura." />
+    <meta name="theme-color" content="#1a66d6" />
     <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="cidadao.css" />
   </head>
-  <body>
-    <header class="hero">
-      <nav class="nav container">
-        <a class="brand" href="#home">SmartGov 360</a>
-        <div class="nav-links">
-          <a href="#home">Início</a>
-          <a href="#registro">Registrar problema</a>
-          <a href="login.html">Painel administrativo</a>
+  <body class="pagina-cidadao">
+    <header class="topbar">
+      <div class="container topbar-inner">
+        <a class="marca" href="index.html">
+          <img src="brasao-municipio.png" alt="" width="44" height="44" />
+          <span><strong>SmartGov 360</strong><small>Prefeitura Municipal</small></span>
+        </a>
+        <nav class="topnav" aria-label="Principal">
+          <a href="#registrar">Registrar ocorrência</a>
+          <a href="#acompanhar">Acompanhar</a>
+          <a href="#como-funciona">Como funciona</a>
+          <a class="btn-entrar" href="login.html">Entrar</a>
+        </nav>
+      </div>
+    </header>
+
+    <section class="hero-cidadao" id="home">
+      <div class="container hero-cidadao-inner">
+        <div class="hero-texto">
+          <h1>Uma cidade melhor começa com você!</h1>
+          <p>Registre um problema na sua cidade de forma rápida e fácil. A Prefeitura recebe, analisa e resolve.</p>
         </div>
-      </nav>
+        <ul class="hero-selos" aria-label="Benefícios">
+          <li><span class="selo-icone"><svg viewBox="0 0 24 24"><path d="M12 3l7 3v5c0 5-3.5 8.5-7 10-3.5-1.5-7-5-7-10V6z"/><path d="M9 12l2 2 4-4"/></svg></span>Mais qualidade de vida</li>
+          <li><span class="selo-icone"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><circle cx="17" cy="9" r="2.5"/><path d="M3 19c0-3 3-5 6-5s6 2 6 5"/><path d="M15 15c2.5 0 5 1.5 5 4"/></svg></span>Cidade mais participativa</li>
+          <li><span class="selo-icone"><svg viewBox="0 0 24 24"><path d="M5 20c0-8 5-14 14-15-1 9-7 14-14 15z"/><path d="M5 20c3-5 7-8 11-11"/></svg></span>Serviços públicos mais eficientes</li>
+          <li><span class="selo-icone"><svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M9 3v4M15 3v4M4 10h16M8 14h3M13 14h3M8 17h3"/></svg></span>Transparência e resultados</li>
+        </ul>
+      </div>
+    </section>
 
-      <div class="container hero-content" id="home">
-        <div>
-          <p class="eyebrow">Cidade inteligente</p>
-          <h1>Uma aplicação completa para transformar a comunicação entre a população e o município.</h1>
-          <p class="lead">
-            O cidadão registra problemas urbanos com foto, endereço e descrição. O administrador
-            acompanha o status, prioriza demandas e acompanha a solução em tempo real.
-          </p>
-          <div class="hero-actions">
-            <a class="btn btn-primary" href="#registro">Cadastrar ocorrência</a>
-            <a class="btn btn-secondary" href="login.html">Acessar painel</a>
+    <main class="container grade-cidadao">
+      <section class="cartao assistente" id="registrar">
+        <div class="assistente-cabecalho">
+          <span class="cabecalho-icone"><svg viewBox="0 0 24 24"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 8h6M9 12h6M9 16h4"/></svg></span>
+          <div>
+            <h2>Registrar uma ocorrência</h2>
+            <p>Preencha as informações abaixo. É rápido e simples.</p>
           </div>
+          <span class="passo-contador" id="passo-contador">Passo 1 de 4</span>
         </div>
 
-        <div class="hero-card" id="registro">
-          <div class="section-heading">
-            <p class="eyebrow">Registro do cidadão</p>
-            <h2>Relate um problema identificado</h2>
-            <p>Preencha os dados abaixo para registrar a ocorrência e encaminhar para a equipe responsável.</p>
-          </div>
+        <ol class="stepper" id="wizard-stepper">
+          <li class="ativo" data-step="1"><span>1</span>Categoria</li>
+          <li data-step="2"><span>2</span>Localização</li>
+          <li data-step="3"><span>3</span>Detalhes</li>
+          <li data-step="4"><span>4</span>Enviar</li>
+        </ol>
 
-          <form id="occurrence-form" class="form-grid">
-            <div class="field">
-              <label for="name">Nome</label>
-              <input id="name" name="name" required placeholder="Seu nome" />
+        <form id="occurrence-form" novalidate>
+          <!-- Passo 1: categoria -->
+          <section class="wizard-step" data-step="1">
+            <h3>Qual é o problema?</h3>
+            <p class="passo-ajuda">Selecione a categoria que melhor descreve a sua ocorrência.</p>
+            <div id="category-grid" class="grade-categorias" role="radiogroup" aria-label="Categoria"></div>
+            <input type="hidden" id="category" name="category" value="" />
+            <input type="hidden" id="priority" name="priority" value="" />
+            <div class="wizard-acoes">
+              <span></span>
+              <button type="button" class="btn-azul" data-next>Próximo <span aria-hidden="true">→</span></button>
             </div>
-            <div class="field">
-              <label for="email">E-mail</label>
-              <input id="email" name="email" type="email" required placeholder="seu@email.com" />
+          </section>
+
+          <!-- Passo 2: localizacao -->
+          <section class="wizard-step" data-step="2" hidden>
+            <h3>Onde está o problema?</h3>
+            <p class="passo-ajuda">Use a sua localização ou informe o endereço. Confira sempre o número.</p>
+
+            <div class="radio-group modo-localizacao" aria-label="Como informar o local">
+              <label class="radio-option">
+                <input type="radio" id="location-geo" name="location-mode" value="geolocation" checked />
+                <span class="opcao-icone"><svg viewBox="0 0 24 24"><path d="M12 21s-6-5.5-6-11a6 6 0 0 1 12 0c0 5.5-6 11-6 11z"/><circle cx="12" cy="10" r="2.5"/></svg></span>
+                Usar minha localização
+              </label>
+              <label class="radio-option">
+                <input type="radio" id="location-manual" name="location-mode" value="manual" />
+                <span class="opcao-icone"><svg viewBox="0 0 24 24"><path d="M4 20h16M6 20V9l6-5 6 5v11"/><path d="M10 20v-6h4v6"/></svg></span>
+                Informar o endereço
+              </label>
             </div>
-            <div class="field">
-              <label for="phone">Telefone</label>
-              <input id="phone" name="phone" placeholder="(11) 99999-9999" />
-            </div>
-            <div class="field full">
-              <label for="photo">Foto (obrigatória)</label>
-              <div class="photo-controls">
-                <input id="photo" name="photo" type="file" accept="image/*" required />
-                <button type="button" id="camera-open" class="btn btn-secondary photo-camera-button">
-                  <span aria-hidden="true">📷</span> Tirar foto com a câmera
-                </button>
-              </div>
-              <input id="photo-camera-fallback" type="file" accept="image/*" capture="environment" hidden />
-              <div id="photo-preview" class="photo-preview" hidden>
-                <img id="photo-preview-img" alt="Pré-visualização da foto selecionada" />
-                <div class="photo-preview-info">
-                  <span id="photo-preview-name"></span>
-                  <button type="button" id="photo-remove" class="btn btn-ghost photo-remove-button">Remover foto</button>
-                </div>
-              </div>
-              <span id="photo-message" class="form-message" role="status" aria-live="polite"></span>
-            </div>
-            <div class="field full">
-              <label>Localização</label>
-              <div class="radio-group">
-                <label class="radio-option">
-                  <input type="radio" id="location-geo" name="location-mode" value="geolocation" checked>
-                  Usar minha localização
-                </label>
-                <label class="radio-option">
-                  <input type="radio" id="location-manual" name="location-mode" value="manual">
-                  Preencher endereço manualmente
-                </label>
-              </div>
-              <span id="geo-message" class="form-message" aria-live="polite"></span>
-            </div>
+            <span id="geo-message" class="form-message" aria-live="polite"></span>
+
+            <div id="wizard-map" class="mapa-wizard" hidden></div>
+            <p id="mapa-dica" class="passo-ajuda" hidden>Arraste o marcador para ajustar o ponto exato. O endereço abaixo é atualizado.</p>
+
             <div id="address-fields" class="address-fields" style="display:none;">
               <div class="field address-cep">
                 <label for="cep">CEP</label>
@@ -115,19 +125,85 @@
                 <input id="state" name="state" placeholder="UF" maxlength="2" autocomplete="address-level1" />
               </div>
             </div>
-            <input type="hidden" id="category" name="category" value="" />
-            <input type="hidden" id="priority" name="priority" value="" />
-            <div id="details-fields" style="display:none;">
-              <div class="field full">
-                <label for="title">Resumo do problema</label>
-                <input id="title" name="title" placeholder="Ex.: Poste com lâmpada apagada" />
+
+            <div class="wizard-acoes">
+              <button type="button" class="btn-link" data-prev><span aria-hidden="true">←</span> Voltar</button>
+              <button type="button" class="btn-azul" data-next>Próximo <span aria-hidden="true">→</span></button>
+            </div>
+          </section>
+
+          <!-- Passo 3: detalhes -->
+          <section class="wizard-step" data-step="3" hidden>
+            <h3>Conte mais detalhes</h3>
+            <p class="passo-ajuda">Descreva o problema e envie uma foto do local.</p>
+
+            <div class="field">
+              <label for="title">Título da ocorrência</label>
+              <input id="title" name="title" maxlength="120" placeholder="Ex.: Buraco na rua" />
+            </div>
+            <div class="field">
+              <label for="description">Descrição</label>
+              <textarea id="description" name="description" rows="4" maxlength="500" placeholder="Descreva o problema: o que é, desde quando, pontos de referência."></textarea>
+              <span class="contador" id="description-count">0/500</span>
+            </div>
+
+            <div class="field">
+              <label for="photo">Foto <small>(obrigatório pelo menos 1 foto)</small></label>
+              <div class="photo-controls">
+                <input id="photo" name="photo" type="file" accept="image/*" required />
+                <button type="button" id="camera-open" class="btn btn-secondary photo-camera-button">
+                  <span aria-hidden="true">📷</span> Tirar foto com a câmera
+                </button>
               </div>
-              <div class="field full">
-                <label for="description">Descrição</label>
-                <textarea id="description" name="description" rows="4" placeholder="Descreva o problema com detalhes e localização aproximada"></textarea>
+              <input id="photo-camera-fallback" type="file" accept="image/*" capture="environment" hidden />
+              <div id="photo-preview" class="photo-preview" hidden>
+                <img id="photo-preview-img" alt="Pré-visualização da foto selecionada" />
+                <div class="photo-preview-info">
+                  <span id="photo-preview-name"></span>
+                  <button type="button" id="photo-remove" class="btn btn-ghost photo-remove-button">Remover foto</button>
+                </div>
+              </div>
+              <span id="photo-message" class="form-message" role="status" aria-live="polite"></span>
+              <p class="passo-ajuda">A foto passa por uma verificação automática: imagens sem relação com um problema urbano não são aceitas.</p>
+            </div>
+
+            <div class="wizard-acoes">
+              <button type="button" class="btn-link" data-prev><span aria-hidden="true">←</span> Voltar</button>
+              <button type="button" class="btn-azul" data-next>Próximo <span aria-hidden="true">→</span></button>
+            </div>
+          </section>
+
+          <!-- Passo 4: confirmar e enviar -->
+          <section class="wizard-step" data-step="4" hidden>
+            <h3>Confirme e envie</h3>
+            <p class="passo-ajuda">Verifique as informações antes de registrar.</p>
+
+            <dl class="resumo-envio">
+              <div><dt>Categoria</dt><dd id="summary-category">—</dd></div>
+              <div><dt>Endereço</dt><dd id="summary-address">—</dd></div>
+              <div><dt>Título</dt><dd id="summary-title">—</dd></div>
+              <div><dt>Descrição</dt><dd id="summary-description">—</dd></div>
+              <div><dt>Foto</dt><dd><img id="summary-photo" class="resumo-foto" alt="Foto da ocorrência" hidden /><span id="summary-photo-none">Sem foto</span></dd></div>
+            </dl>
+
+            <h4 class="subtitulo">Seus dados para contato</h4>
+            <p class="passo-ajuda">Usados só para enviar o protocolo e as atualizações desta ocorrência.</p>
+            <div class="contato-grid">
+              <div class="field">
+                <label for="name">Nome</label>
+                <input id="name" name="name" required placeholder="Seu nome" autocomplete="name" />
+              </div>
+              <div class="field">
+                <label for="email">E-mail</label>
+                <input id="email" name="email" type="email" required placeholder="seu@email.com" autocomplete="email" />
+              </div>
+              <div class="field">
+                <label for="phone">WhatsApp <small>(opcional)</small></label>
+                <input id="phone" name="phone" placeholder="(11) 99999-9999" inputmode="tel" autocomplete="tel" />
               </div>
             </div>
-            <div class="field full consent-field">
+
+            <div class="field consent-field">
               <label class="consent-check" for="lgpd-consent">
                 <input type="checkbox" id="lgpd-consent" name="lgpd-consent" required />
                 <span>
@@ -137,22 +213,80 @@
                 </span>
               </label>
             </div>
-            <div class="field full submit-wrapper">
-              <button id="submit-button" class="btn btn-secondary" type="submit">Enviar ocorrência</button>
-              <span id="submit-loading" class="loading-indicator hidden">Aguarde, carregando...</span>
+
+            <div class="wizard-acoes">
+              <button type="button" class="btn-link" data-prev><span aria-hidden="true">←</span> Voltar</button>
+              <button id="submit-button" class="btn-azul btn-enviar" type="submit">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 3L3 10l7 3 3 7z"/><path d="M10 13l11-10"/></svg>
+                Enviar ocorrência
+              </button>
             </div>
-          </form>
+            <span id="submit-loading" class="loading-indicator hidden">Verificando a foto e registrando a ocorrência...</span>
+          </section>
+        </form>
 
-          <div id="form-message" class="form-message" role="status" aria-live="polite"></div>
+        <div id="form-message" class="form-message" role="status" aria-live="polite"></div>
 
-          <!-- debug button removed -->
+        <!-- Sucesso -->
+        <div id="wizard-success" class="sucesso" hidden>
+          <span class="sucesso-icone" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M8 12.5l3 3 5-6"/></svg></span>
+          <h3>Ocorrência registrada com sucesso!</h3>
+          <p>Sua solicitação foi enviada para a Prefeitura Municipal.</p>
+          <div class="protocolo-caixa">
+            <span>Número de protocolo</span>
+            <strong><span id="success-protocol">#—</span>
+              <button type="button" id="copy-protocol" class="btn-copiar" title="Copiar número" aria-label="Copiar número do protocolo"><svg viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg></button>
+            </strong>
+            <small>Guarde este número para acompanhar o andamento. Ele também foi enviado para o seu e-mail.</small>
+          </div>
+          <div class="sucesso-acoes">
+            <button type="button" id="success-track" class="btn-azul">Acompanhar minha ocorrência</button>
+            <button type="button" id="success-new" class="btn-azul-contorno">Registrar nova ocorrência</button>
+            <a href="#home" class="btn-link">Voltar para o início</a>
+          </div>
         </div>
-      </div>
-    </header>
+      </section>
 
-    <footer class="footer">
+      <aside class="coluna-lateral">
+        <section class="cartao" id="acompanhar">
+          <div class="assistente-cabecalho compacto">
+            <span class="cabecalho-icone"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg></span>
+            <div>
+              <h2>Acompanhar minha ocorrência</h2>
+              <p>Digite o número do protocolo para ver o status e as atualizações.</p>
+            </div>
+          </div>
+          <form id="track-form" class="busca-protocolo">
+            <label class="sr-only" for="track-input">Número do protocolo</label>
+            <input id="track-input" inputmode="numeric" placeholder="Ex.: 1042" />
+            <button type="submit" class="btn-azul">Buscar</button>
+          </form>
+          <div id="track-result" class="resultado-protocolo" aria-live="polite"></div>
+        </section>
+
+        <section class="cartao">
+          <div class="cartao-titulo">
+            <h2>Ocorrências recentes na sua cidade</h2>
+          </div>
+          <ul id="recent-list" class="lista-recentes"><li class="muted">Carregando...</li></ul>
+        </section>
+      </aside>
+    </main>
+
+    <section class="container como-funciona" id="como-funciona">
+      <h2>Como funciona?</h2>
+      <p class="passo-ajuda">Em poucos passos sua ocorrência é registrada e acompanhada até a solução.</p>
+      <ol class="passos-funciona">
+        <li><span class="passo-icone"><svg viewBox="0 0 24 24"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 8h6M9 12h6M9 16h4"/></svg></span><strong>1. Registre</strong><span>Informe o problema e envie uma foto.</span></li>
+        <li><span class="passo-icone"><svg viewBox="0 0 24 24"><path d="M12 21s-6-5.5-6-11a6 6 0 0 1 12 0c0 5.5-6 11-6 11z"/><circle cx="12" cy="10" r="2.5"/></svg></span><strong>2. Acompanhe</strong><span>Receba um número de protocolo e veja o status.</span></li>
+        <li><span class="passo-icone"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2"/></svg></span><strong>3. Prefeitura atua</strong><span>A equipe responsável analisa e executa o serviço.</span></li>
+        <li><span class="passo-icone verde"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M8 12.5l3 3 5-6"/></svg></span><strong>4. Problema resolvido</strong><span>Você é notificado e pode avaliar o atendimento.</span></li>
+      </ol>
+    </section>
+
+    <footer class="rodape-cidadao">
       <div class="container footer-content">
-        <p>SmartGov 360 — Aplicação demonstrativa de gestão municipal</p>
+        <p>SmartGov 360 — Atendimento ao Cidadão · <a href="privacidade.html">Política de Privacidade</a></p>
         <p>© <span id="year"></span></p>
       </div>
     </footer>

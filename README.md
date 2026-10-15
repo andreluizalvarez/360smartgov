@@ -113,11 +113,12 @@ versão nova está mesmo no ar.
 
 ## Funcionalidades
 
-- front-end estático: `index.html`, `login.html`, `preview.html`, `styles.css`, `script.js`, `preview.js`
+- front-end estático: `index.html` (registro em 4 passos e acompanhamento por protocolo), `login.html`, `avaliar.html`, `privacidade.html`, `styles.css`, `cidadao.css`, `script.js`, `avaliar.js`
 - backend Node.js: `server.js` (autenticação em `auth.js`, ocorrências em `incidentes.js`)
 - classificação por IA: `/api/classify` e `/api/classify-image`
 - notificações ao cidadão: `/api/notify-user`
 - ocorrências: `POST /api/incidentes` (abertura pública), `GET`/`PUT`/`DELETE /api/incidentes[/:id]` (painel, com sessão)
+- acompanhamento público: `GET /api/protocolo/:numero` (status e etapas, sem dados pessoais) e `GET /api/incidentes/recentes`
 
 ## Perfis de acesso
 

@@ -1379,7 +1379,7 @@ function renderIncidents(incidents) {
     .map((item) => `
       <tr data-id="${item.id}">
         <td>
-          <strong>${item.title}</strong><br />
+          ${Number.isInteger(item.protocolo) ? `<small class="protocolo-tag">#${item.protocolo}</small> ` : ''}<strong>${item.title}</strong><br />
           <small>${item.description}</small>
         </td>
         <td>${item.category}</td>
@@ -1448,7 +1448,7 @@ function showIncidentDetail(id) {
   const incidents = getVisibleIncidents(getIncidents());
   const incident = incidents.find((it) => it.id === id);
   if (!incident) return;
-  if (detailTitle) detailTitle.textContent = incident.title || 'Ocorrência';
+  if (detailTitle) detailTitle.textContent = (Number.isInteger(incident.protocolo) ? '#' + incident.protocolo + ' · ' : '') + (incident.title || 'Ocorrência');
   if (detailCategory) detailCategory.textContent = incident.category || '';
   if (detailPriority) detailPriority.textContent = incident.priority || '';
   if (detailName) detailName.textContent = incident.name || '';
@@ -1949,7 +1949,7 @@ if (occurrenceForm) {
 
     // A localização é resolvida antes do "Aguarde, carregando...": se o navegador
     // estiver bloqueando, o popup de desbloqueio aparece sem a tela em estado de envio.
-    if (locationMode === 'geolocation') {
+    if (locationMode === 'geolocation' && !temCoordenadasNaSessao()) {
       showMessage(formMessage, '', false);
       const geoOk = await requestGeolocationPermission();
       if (!geoOk) {
@@ -2019,33 +2019,22 @@ if (occurrenceForm) {
         return;
       }
 
+      const categoriaEscolhida = (categoryInput?.value || '').trim();
       if (imgResult) {
-        classification.category = imgResult.category || classification.category;
+        classification.category = categoriaEscolhida || imgResult.category || classification.category;
         classification.priority = imgResult.priority || classification.priority;
-        if (imgResult.title) {
-          title = imgResult.title;
-        }
-        if (imgResult.description) {
-          description = imgResult.description;
-        }
+        // O que o cidadao escreveu prevalece; a IA so completa o que ficou vazio.
+        if (!title && imgResult.title) title = imgResult.title;
+        if (!description && imgResult.description) description = imgResult.description;
       } else {
         const textResult = await classifyIncident(description, cep, street, number, neighborhood, city, state);
         classification = { ...classification, ...textResult };
-        if (textResult.title) {
-          title = textResult.title;
-        }
-        if (textResult.description) {
-          description = textResult.description;
-        }
+        if (categoriaEscolhida) classification.category = categoriaEscolhida;
+        if (!title && textResult.title) title = textResult.title;
+        if (!description && textResult.description) description = textResult.description;
       }
 
-      // clear hidden classification fields on form submit
-      if (categoryInput) categoryInput.value = '';
-      if (priorityInput) priorityInput.value = '';
-      if (categorySelect) categorySelect.value = '';
-      if (prioritySelect) prioritySelect.value = '';
-
-      // update title/description fields if the model provided new values
+      if (priorityInput) priorityInput.value = classification.priority || '';
       const titleField = document.getElementById('title');
       const descField = document.getElementById('description');
       if (titleField) titleField.value = title;
@@ -2090,19 +2079,19 @@ if (occurrenceForm) {
         createdAt: new Date().toISOString()
       };
 
-      try {
-        sessionStorage.setItem('smartgov360-preview-incident', JSON.stringify(incident));
-      } catch (error) {
-        if (!erroDeEspaco(error)) throw error;
-        console.error('[foto] Sem espaco no navegador para a ocorrencia:', error);
-        showMessage(
-          formMessage,
-          'A foto é grande demais para o armazenamento do navegador. Tente uma foto menor ou tire outra pela câmera.',
-          true
-        );
+      showMessage(formMessage, 'Registrando a ocorrência...', false);
+      const resposta = await fetch('/api/incidentes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(incident)
+      });
+      const corpo = await resposta.json().catch(() => ({}));
+      if (!resposta.ok) {
+        showMessage(formMessage, corpo.error || 'Não foi possível registrar a ocorrência. Tente novamente.', true);
         return;
       }
-      window.location.href = 'preview.html';
+      showMessage(formMessage, '', false);
+      mostrarSucessoDoWizard(corpo.incidente);
     } catch (error) {
       console.error('Erro ao enviar a ocorrência:', error);
       showMessage(
@@ -3583,3 +3572,352 @@ restaurarSessaoDoServidor().then((restaurada) => {
 });
 
 refreshDashboard();
+
+
+// =====================================================================
+// Formulario do cidadao em quatro passos (index.html)
+// =====================================================================
+function temCoordenadasNaSessao() {
+  const lat = sessionStorage.getItem('smartgov360-last-latitude');
+  const lng = sessionStorage.getItem('smartgov360-last-longitude');
+  return Boolean(lat && lng && Number.isFinite(Number(lat)) && Number.isFinite(Number(lng)));
+}
+
+// Icones por palavra-chave da categoria (cadastrada pelo administrador).
+const ICONES_CATEGORIA = [
+  [/buraco|asfalto|pavimento|via|rua/, '<svg viewBox="0 0 24 24"><path d="M8 4h8l4 16H4z"/><path d="M12 6v3M12 12v3M12 18v2"/></svg>'],
+  [/ilumina|poste|l[aâ]mpada|luz/, '<svg viewBox="0 0 24 24"><path d="M9 18h6M10 21h4"/><path d="M8 13a5 5 0 1 1 8 0c-1 1-1.5 2-1.5 3h-5c0-1-.5-2-1.5-3z"/><path d="M12 2v1M4 10h1M19 10h1M6 4l.7.7M18 4l-.7.7"/></svg>'],
+  [/lixo|coleta|entulho|res[ií]duo/, '<svg viewBox="0 0 24 24"><path d="M5 7h14M9 7V4h6v3M7 7l1 13h8l1-13"/><path d="M10 11v6M14 11v6"/></svg>'],
+  [/limpeza|varri|capina|mato/, '<svg viewBox="0 0 24 24"><path d="M14 3l-5 9"/><path d="M9 12l-5 2 2 6 6-2 2-6z"/><path d="M6 14l2 6"/></svg>'],
+  [/[aá]rvore|poda|verde|pra[çc]a|parque/, '<svg viewBox="0 0 24 24"><path d="M12 22v-6"/><path d="M8 16h8l-2-4h1l-3-5h1l-3-5-3 5h1l-3 5h1z"/></svg>'],
+  [/cal[çc]ada|passeio|acessib/, '<svg viewBox="0 0 24 24"><circle cx="13" cy="4" r="1.6"/><path d="M11 20l1-6 3 2v4M8 12l3-4 3 1 2 3"/><path d="M3 21h18"/></svg>'],
+  [/drenag|bueiro|esgoto|[aá]gua|alag|enchente/, '<svg viewBox="0 0 24 24"><path d="M12 3s6 7 6 11a6 6 0 0 1-12 0c0-4 6-11 6-11z"/></svg>'],
+  [/sinaliza|placa|sem[aá]foro|tr[aâ]nsito/, '<svg viewBox="0 0 24 24"><path d="M12 3l9 16H3z"/><path d="M12 10v4M12 17v.5"/></svg>'],
+  [/anim|cachorro|c[aã]o|zoonose/, '<svg viewBox="0 0 24 24"><circle cx="8" cy="8" r="2"/><circle cx="16" cy="8" r="2"/><circle cx="5" cy="13" r="1.8"/><circle cx="19" cy="13" r="1.8"/><path d="M12 12c3 0 5 2.5 5 5s-2 3-5 3-5-.5-5-3 2-5 5-5z"/></svg>'],
+  [/sa[uú]de|posto|ubs/, '<svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M12 8v8M8 12h8"/></svg>'],
+  [/escola|educa/, '<svg viewBox="0 0 24 24"><path d="M3 9l9-4 9 4-9 4z"/><path d="M7 11v5c0 1.5 2.5 3 5 3s5-1.5 5-3v-5"/><path d="M21 9v5"/></svg>']
+];
+const ICONE_OUTROS = '<svg viewBox="0 0 24 24"><circle cx="6" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="18" cy="12" r="1.5"/></svg>';
+
+function iconeDaCategoria(nome) {
+  const chave = (nome || '').toString().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  const achado = ICONES_CATEGORIA.find(([re]) => re.test(chave));
+  return achado ? achado[1] : ICONE_OUTROS;
+}
+
+function classeDoStatus(status) {
+  const s = (status || '').toLowerCase();
+  if (s.startsWith('conclu')) return 'concluido';
+  if (s.startsWith('em and')) return 'andamento';
+  return 'recebido';
+}
+
+function dataCurta(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString('pt-BR') + ' - ' + d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+}
+
+const wizardStepper = document.getElementById('wizard-stepper');
+const wizardSteps = Array.from(document.querySelectorAll('.wizard-step'));
+const wizardSuccess = document.getElementById('wizard-success');
+const categoryGrid = document.getElementById('category-grid');
+let passoAtual = 1;
+
+function irParaPasso(n) {
+  passoAtual = Math.max(1, Math.min(4, n));
+  wizardSteps.forEach((sec) => { sec.hidden = Number(sec.dataset.step) !== passoAtual; });
+  if (wizardStepper) {
+    wizardStepper.querySelectorAll('li').forEach((li) => {
+      const s = Number(li.dataset.step);
+      li.classList.toggle('ativo', s === passoAtual);
+      li.classList.toggle('feito', s < passoAtual);
+    });
+  }
+  const contador = document.getElementById('passo-contador');
+  if (contador) contador.textContent = `Passo ${passoAtual} de 4`;
+  showMessage(formMessage, '', false);
+  if (passoAtual === 4) preencherResumoDoWizard();
+  document.getElementById('registrar')?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+}
+
+function renderCategoriasDoWizard() {
+  if (!categoryGrid) return;
+  const categorias = getCategoryConfig();
+  const atual = categoryInput?.value || '';
+  categoryGrid.innerHTML = categorias.map((nome) => `
+    <button type="button" class="categoria-opcao" role="radio" aria-checked="${nome === atual ? 'true' : 'false'}" data-categoria="${escapeHtml(nome)}">
+      ${iconeDaCategoria(nome)}<span>${escapeHtml(nome.charAt(0).toUpperCase() + nome.slice(1))}</span>
+    </button>`).join('');
+}
+
+if (categoryGrid) {
+  categoryGrid.addEventListener('click', (event) => {
+    const btn = event.target.closest('.categoria-opcao');
+    if (!btn) return;
+    categoryGrid.querySelectorAll('.categoria-opcao').forEach((b) => b.setAttribute('aria-checked', 'false'));
+    btn.setAttribute('aria-checked', 'true');
+    if (categoryInput) categoryInput.value = btn.dataset.categoria;
+    showMessage(formMessage, '', false);
+  });
+  renderCategoriasDoWizard();
+  // As categorias vem do servidor; redesenha quando a lista chegar.
+  carregarConfiguracaoDoServidor().then(() => renderCategoriasDoWizard());
+}
+
+// Validacao de cada passo antes de avancar. Devolve a mensagem de erro ou null.
+function validarPassoDoWizard(n) {
+  if (n === 1) {
+    if (!categoryInput?.value) return { mensagem: 'Escolha a categoria do problema.' };
+    return null;
+  }
+  if (n === 2) {
+    if (geoRadio?.checked && !temCoordenadasNaSessao()) {
+      return { mensagem: 'Clique em "Usar minha localização" e autorize o acesso, ou escolha "Informar o endereço".' };
+    }
+    const faltando = validarEnderecoManual();
+    if (faltando) {
+      if (addressFields) addressFields.style.display = 'grid';
+      return faltando;
+    }
+    return null;
+  }
+  if (n === 3) {
+    const desc = document.getElementById('description');
+    if (desc && desc.value.trim().length < 10) return { mensagem: 'Descreva o problema com pelo menos 10 caracteres.', campo: desc };
+    if (!getSelectedPhotoFile()) return { mensagem: 'Envie uma foto do problema: anexe um arquivo ou tire uma foto com a câmera.', campo: photoInput };
+    return null;
+  }
+  return null;
+}
+
+document.querySelectorAll('[data-next]').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    const erro = validarPassoDoWizard(passoAtual);
+    if (erro) {
+      showMessage(formMessage, erro.mensagem, true);
+      erro.campo?.focus?.();
+      return;
+    }
+    irParaPasso(passoAtual + 1);
+  });
+});
+document.querySelectorAll('[data-prev]').forEach((btn) => {
+  btn.addEventListener('click', () => irParaPasso(passoAtual - 1));
+});
+
+const descricaoCampo = document.getElementById('description');
+const descricaoContador = document.getElementById('description-count');
+if (descricaoCampo && descricaoContador) {
+  descricaoCampo.addEventListener('input', () => { descricaoContador.textContent = `${descricaoCampo.value.length}/500`; });
+}
+
+function preencherResumoDoWizard() {
+  const set = (id, valor) => { const el = document.getElementById(id); if (el) el.textContent = valor || '—'; };
+  set('summary-category', categoryInput?.value);
+  const partes = [streetInput?.value, numberInput?.value, neighborhoodInput?.value, [cityInput?.value, stateInput?.value].filter(Boolean).join(' - ')].filter((v) => v && v.trim());
+  set('summary-address', partes.join(', '));
+  set('summary-title', document.getElementById('title')?.value);
+  set('summary-description', document.getElementById('description')?.value);
+  const foto = getSelectedPhotoFile();
+  const img = document.getElementById('summary-photo');
+  const semFoto = document.getElementById('summary-photo-none');
+  if (img && semFoto) {
+    if (foto) {
+      img.src = URL.createObjectURL(foto);
+      img.hidden = false;
+      semFoto.hidden = true;
+    } else {
+      img.hidden = true;
+      semFoto.hidden = false;
+    }
+  }
+}
+
+// Mapa do passo 2: aparece quando a localizacao e obtida; o marcador pode ser
+// arrastado para o ponto exato, e o endereco e refeito a partir dele.
+let mapaWizard = null;
+let marcadorWizard = null;
+
+function mostrarMapaDoWizard() {
+  const el = document.getElementById('wizard-map');
+  const dica = document.getElementById('mapa-dica');
+  if (!el || !window.google?.maps || !temCoordenadasNaSessao()) return;
+  const lat = Number(sessionStorage.getItem('smartgov360-last-latitude'));
+  const lng = Number(sessionStorage.getItem('smartgov360-last-longitude'));
+  el.hidden = false;
+  if (dica) dica.hidden = false;
+  if (!mapaWizard) {
+    mapaWizard = new google.maps.Map(el, { center: { lat, lng }, zoom: 17, mapTypeControl: false, streetViewControl: false, fullscreenControl: false });
+    marcadorWizard = new google.maps.Marker({ position: { lat, lng }, map: mapaWizard, draggable: true, title: 'Arraste para ajustar' });
+    marcadorWizard.addListener('dragend', async () => {
+      const pos = marcadorWizard.getPosition();
+      const nlat = pos.lat();
+      const nlng = pos.lng();
+      sessionStorage.setItem('smartgov360-last-latitude', String(nlat));
+      sessionStorage.setItem('smartgov360-last-longitude', String(nlng));
+      showGeoMessage('Atualizando o endereço do ponto marcado...');
+      const result = await reverseGeocode(nlat, nlng);
+      if (!result) {
+        showGeoMessage('Não foi possível obter o endereço deste ponto. Confira os campos abaixo.', { isError: true });
+        return;
+      }
+      if (cepInput) cepInput.value = result.cep;
+      if (streetInput) streetInput.value = result.street;
+      if (neighborhoodInput) neighborhoodInput.value = result.neighborhood;
+      if (cityInput) cityInput.value = result.city;
+      if (stateInput) stateInput.value = result.state;
+      if (numberInput) {
+        definirSemNumero(false);
+        numberInput.value = result.number;
+      }
+      showGeoMessage(result.number ? 'Endereço atualizado pelo ponto marcado. Confira os dados.' : 'Endereço atualizado. Informe o número.');
+    });
+  } else {
+    mapaWizard.setCenter({ lat, lng });
+    marcadorWizard.setPosition({ lat, lng });
+  }
+}
+
+// Sempre que a localizacao automatica preencher o endereco, o mapa aparece.
+if (document.getElementById('wizard-map')) {
+  const observador = new MutationObserver(() => {
+    if (enderecoLocalizado && geoRadio?.checked) mostrarMapaDoWizard();
+  });
+  if (addressFields) observador.observe(addressFields, { attributes: true, attributeFilter: ['style'] });
+}
+
+// Sucesso: esconde o formulario e mostra o protocolo.
+function mostrarSucessoDoWizard(incidente) {
+  if (!wizardSuccess) return;
+  if (occurrenceForm) occurrenceForm.hidden = true;
+  if (wizardStepper) wizardStepper.hidden = true;
+  const contador = document.getElementById('passo-contador');
+  if (contador) contador.hidden = true;
+  const numero = Number.isInteger(incidente?.protocolo) ? incidente.protocolo : null;
+  const alvo = document.getElementById('success-protocol');
+  if (alvo) alvo.textContent = numero ? '#' + numero : 'registrado';
+  wizardSuccess.hidden = false;
+  wizardSuccess.dataset.protocolo = numero || '';
+  document.getElementById('registrar')?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+}
+
+document.getElementById('copy-protocol')?.addEventListener('click', async () => {
+  const numero = wizardSuccess?.dataset.protocolo;
+  if (!numero) return;
+  try {
+    await navigator.clipboard.writeText(numero);
+    showMessage(formMessage, 'Número copiado.', false);
+  } catch (error) {
+    showMessage(formMessage, 'Não foi possível copiar. Anote o número: ' + numero, true);
+  }
+});
+document.getElementById('success-new')?.addEventListener('click', () => { window.location.href = 'index.html#registrar'; window.location.reload(); });
+document.getElementById('success-track')?.addEventListener('click', () => {
+  const numero = wizardSuccess?.dataset.protocolo;
+  const input = document.getElementById('track-input');
+  if (input && numero) {
+    input.value = numero;
+    document.getElementById('track-form')?.requestSubmit();
+  }
+  document.getElementById('acompanhar')?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+});
+
+// ---------- acompanhamento por protocolo ----------
+const trackForm = document.getElementById('track-form');
+const trackInput = document.getElementById('track-input');
+const trackResult = document.getElementById('track-result');
+
+function renderAcompanhamento(o) {
+  const etapa = (status) => o.etapas.find((e) => e.status === status);
+  const emAndamento = etapa('Em andamento');
+  const concluido = o.status === 'Concluído' ? (etapa('Concluído') || { at: o.concluidoEm }) : null;
+  const classeDe = (feito, atual) => (feito ? 'feito' : atual ? 'atual' : 'pendente');
+  const itens = [
+    ['Recebido', dataCurta(o.createdAt), 'Sua ocorrência foi recebida pela prefeitura.', 'feito'],
+    ['Em andamento', emAndamento ? dataCurta(emAndamento.at) : '', emAndamento ? 'A equipe responsável foi designada.' : 'Aguardando o encaminhamento ao setor responsável.', classeDe(Boolean(emAndamento) && Boolean(concluido), Boolean(emAndamento) && !concluido)],
+    ['Concluído', concluido ? dataCurta(concluido.at) : '', concluido ? (o.respostaConclusao || 'Atendimento concluído.') : 'Você será avisado quando o serviço for concluído.', concluido ? 'feito' : 'pendente'],
+    ['Avalie o atendimento', '', o.avaliada ? 'Obrigado pela sua avaliação' + (o.nota ? ' (' + o.nota + '/5).' : '.') : (concluido ? 'Use o link enviado para o seu e-mail.' : 'Disponível após a conclusão.'), o.avaliada ? 'feito' : 'pendente']
+  ];
+  const local = [o.street, o.neighborhood, [o.city, o.state].filter(Boolean).join(' - ')].filter(Boolean).join(', ');
+  return `
+    <div class="track-card">
+      <div class="track-head">
+        <span class="cat-icone">${iconeDaCategoria(o.category)}</span>
+        <div>
+          <strong>#${o.protocolo}</strong>
+          <span>${escapeHtml(o.title || 'Ocorrência')}</span><br />
+          <small>${dataCurta(o.createdAt)}</small><br />
+          <span class="chip-status ${classeDoStatus(o.status)}">${escapeHtml(o.status)}</span>
+        </div>
+      </div>
+      <ol class="timeline">
+        ${itens.map(([titulo, data, texto, classe]) => `<li class="${classe}"><span class="ponto"></span><strong>${titulo}</strong>${data ? `<small>${data}</small>` : ''}<small>${escapeHtml(texto)}</small></li>`).join('')}
+      </ol>
+      <details class="track-detalhes">
+        <summary>Ver detalhes da ocorrência</summary>
+        <p><strong>Categoria:</strong> ${escapeHtml(o.category || '—')}</p>
+        <p><strong>Endereço:</strong> ${escapeHtml(local || '—')}</p>
+        <p><strong>Descrição:</strong> ${escapeHtml(o.description || '—')}</p>
+        ${o.respostaConclusao ? `<p><strong>Resposta da Prefeitura:</strong> ${escapeHtml(o.respostaConclusao)}</p>` : ''}
+      </details>
+    </div>`;
+}
+
+async function buscarProtocolo(numero) {
+  if (!trackResult) return;
+  const limpo = (numero || '').toString().replace(/\D/g, '');
+  if (!limpo) {
+    trackResult.innerHTML = '<p class="form-message error">Digite o número do protocolo.</p>';
+    return;
+  }
+  trackResult.innerHTML = '<p class="muted">Consultando...</p>';
+  try {
+    const resposta = await fetch(`/api/protocolo/${encodeURIComponent(limpo)}`);
+    const dados = await resposta.json().catch(() => ({}));
+    if (!resposta.ok) {
+      trackResult.innerHTML = `<p class="form-message error">${escapeHtml(dados.error || 'Protocolo não encontrado.')}</p>`;
+      return;
+    }
+    trackResult.innerHTML = renderAcompanhamento(dados.ocorrencia);
+  } catch (error) {
+    trackResult.innerHTML = '<p class="form-message error">Não foi possível consultar. Tente novamente.</p>';
+  }
+}
+
+if (trackForm) {
+  trackForm.addEventListener('submit', (event) => {
+    event.preventDefault();
+    buscarProtocolo(trackInput?.value);
+  });
+  const daUrl = new URLSearchParams(window.location.search).get('protocolo');
+  if (daUrl && trackInput) {
+    trackInput.value = daUrl;
+    buscarProtocolo(daUrl);
+    document.getElementById('acompanhar')?.scrollIntoView({ block: 'start' });
+  }
+}
+
+// ---------- ocorrencias recentes ----------
+const recentList = document.getElementById('recent-list');
+async function carregarRecentes() {
+  if (!recentList) return;
+  try {
+    const resposta = await fetch('/api/incidentes/recentes');
+    const dados = await resposta.json().catch(() => ({}));
+    const lista = dados.incidentes || [];
+    if (!lista.length) {
+      recentList.innerHTML = '<li class="muted">Ainda não há ocorrências registradas.</li>';
+      return;
+    }
+    recentList.innerHTML = lista.map((i) => `
+      <li>
+        <span class="cat-icone">${iconeDaCategoria(i.category)}</span>
+        <div><strong>${escapeHtml(i.title || 'Ocorrência')}</strong><small>#${i.protocolo} · ${escapeHtml(i.neighborhood || i.city || '')} · ${dataCurta(i.createdAt)}</small></div>
+        <span class="chip-status ${classeDoStatus(i.status)}">${escapeHtml(i.status)}</span>
+      </li>`).join('');
+  } catch (error) {
+    recentList.innerHTML = '<li class="muted">Não foi possível carregar.</li>';
+  }
+}
+carregarRecentes();

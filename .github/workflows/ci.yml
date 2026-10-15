@@ -26,7 +26,7 @@ jobs:
         run: |
           node --check server.js
           node --check script.js
-          node --check preview.js
+          node --check avaliar.js
 
       - name: Testes de regressao
         run: |

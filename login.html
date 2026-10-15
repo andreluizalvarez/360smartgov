@@ -3,82 +3,85 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Login Administrativo | SmartGov 360</title>
-    <meta name="description" content="Página de login administrativo para SmartGov 360." />
+    <title>Painel de Gestão | SmartGov 360</title>
+    <meta name="description" content="Painel de gestão das ocorrências municipais do SmartGov 360." />
+    <meta name="theme-color" content="#1a66d6" />
     <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="cidadao.css" />
+    <link rel="stylesheet" href="painel.css" />
   </head>
-  <body>
-    <header class="hero">
-      <nav class="nav container">
-        <a class="brand" href="index.html">SmartGov 360</a>
-        <div class="nav-links">
-          <a href="index.html">Início</a>
-          <a href="login.html">Login</a>
-        </div>
-      </nav>
-
-      <div class="container hero-content" id="home">
-        <div>
-          <p class="eyebrow">Acesso Administrativo</p>
-          <h1>Entrar no painel de gestão</h1>
-          <p class="lead">
-            Faça login para acessar o painel de ocorrências, acompanhar status e priorizar atendimentos.
-          </p>
-        </div>
+  <body class="pagina-cidadao pagina-painel">
+    <header class="topbar">
+      <div class="topbar-inner topbar-painel">
+        <a class="marca" href="index.html">
+          <img src="brasao-municipio.png" alt="" width="44" height="44" />
+          <span><strong>SmartGov 360</strong><small>Prefeitura Municipal</small></span>
+        </a>
+        <nav class="topnav" aria-label="Principal">
+          <a href="index.html">Site do cidadão</a>
+        </nav>
       </div>
     </header>
 
-    <main class="container app-shell">
-      <section class="panel">
-        <div class="section-heading">
-          <p class="eyebrow">Painel administrativo</p>
-          <h2>Login administrativo</h2>
-          <p>Use as credenciais de demonstração para acessar a área de gestão.</p>
-        </div>
-
-        <div class="admin-box" id="admin-login">
-          <h3>Login administrativo</h3>
-          <form id="login-form" class="form-grid compact">
-            <div class="field">
+    <main class="painel-shell">
+      <div id="admin-login" class="login-tela">
+        <div class="cartao login-cartao">
+          <span class="cabecalho-icone login-icone"><svg viewBox="0 0 24 24"><rect x="5" y="10" width="14" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg></span>
+          <h1>Entrar no painel de gestão</h1>
+          <p class="passo-ajuda">Acesso para secretarias e gabinete. As ocorrências dos cidadãos são acompanhadas no <a href="index.html#acompanhar">site do cidadão</a>.</p>
+          <form id="login-form" class="form-grid compact login-form">
+            <div class="field full">
               <label for="username">Usuário</label>
-              <input id="username" name="username" required placeholder="admin" />
-            </div>
-            <div class="field">
-              <label for="password">Senha</label>
-              <input id="password" name="password" type="password" required placeholder="admin123" />
+              <input id="username" name="username" required placeholder="seu.usuario" autocomplete="username" />
             </div>
             <div class="field full">
-              <button class="btn btn-secondary" type="submit">Entrar</button>
+              <label for="password">Senha</label>
+              <input id="password" name="password" type="password" required placeholder="Sua senha" autocomplete="current-password" />
+            </div>
+            <div class="field full">
+              <button class="btn-azul btn-largo" type="submit">Entrar</button>
             </div>
           </form>
-          <p class="hint">Credenciais de demonstração: admin / admin123</p>
-          <div id="login-message" class="form-message"></div>
+          <div id="login-message" class="form-message" role="status" aria-live="polite"></div>
         </div>
+      </div>
 
-        <div id="admin-dashboard" class="panel hidden">
-          <div class="section-heading">
-            <p class="eyebrow">Painel administrativo</p>
+      <div id="admin-dashboard" class="painel hidden">
+        <aside class="sidebar">
+          <div class="sidebar-usuario">
+            <span class="avatar" id="sidebar-avatar">—</span>
+            <div><strong id="sidebar-user">—</strong><small id="sidebar-role">—</small></div>
           </div>
+          <nav class="sidebar-nav" role="tablist" aria-label="Seções do painel">
+            <button id="tab-executive" class="tab-button" role="tab"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.5"/><path d="M5 20c0-3.5 3-6 7-6s7 2.5 7 6"/><path d="M12 11.5v3"/></svg><span>Visão do Prefeito</span></button>
+            <button id="tab-occurrences" class="tab-button active" role="tab" aria-selected="true"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 9h8M8 13h8M8 17h5"/></svg><span>Ocorrências</span></button>
+            <button id="tab-productivity" class="tab-button" role="tab"><svg viewBox="0 0 24 24"><path d="M4 19h16"/><path d="M7 16V9M12 16V5M17 16v-6"/></svg><span>Produtividade</span></button>
+            <button id="tab-categories" class="tab-button" role="tab"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/></svg><span>Categorias</span></button>
+            <button id="tab-priorities" class="tab-button" role="tab"><svg viewBox="0 0 24 24"><path d="M12 3l9 16H3z"/><path d="M12 10v4M12 17v.5"/></svg><span>Prioridades</span></button>
+            <button id="tab-users" class="tab-button" role="tab"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><circle cx="17" cy="9" r="2.5"/><path d="M3 19c0-3 3-5 6-5s6 2 6 5"/><path d="M15 15c2.5 0 5 1.5 5 4"/></svg><span>Usuários</span></button>
+            <button id="tab-notifications" class="tab-button" role="tab"><svg viewBox="0 0 24 24"><path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4z"/><path d="M10 21h4"/></svg><span>Notificações</span></button>
+            <button id="tab-password" class="tab-button" role="tab"><svg viewBox="0 0 24 24"><rect x="5" y="10" width="14" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg><span>Minha senha</span></button>
+          </nav>
+          <div class="sidebar-rodape">
+            <button id="clear-incidents-btn" class="btn-perigo" type="button">Limpar ocorrências</button>
+            <button id="logout-btn" class="btn-sair" type="button">Sair</button>
+          </div>
+        </aside>
 
-          <div class="admin-tabs">
-            <div class="tab-buttons" role="tablist" aria-label="Admin tabs">
-              <button id="tab-occurrences" class="tab-button active" role="tab" aria-selected="true">Ocorrências</button>
-              <button id="tab-categories" class="tab-button" role="tab">Categorias</button>
-              <button id="tab-priorities" class="tab-button" role="tab">Prioridades</button>
-              <button id="tab-users" class="tab-button" role="tab">Usuários</button>
-              <button id="tab-password" class="tab-button" role="tab">Minha senha</button>
-              <button id="tab-executive" class="tab-button" role="tab">Visão executiva</button>
-              <button id="tab-productivity" class="tab-button" role="tab">Produtividade</button>
-              <button id="tab-notifications" class="tab-button" role="tab">Notificações</button>
+        <section class="painel-conteudo">
+          <header class="conteudo-topo">
+            <div>
+              <h1 id="painel-titulo">Ocorrências</h1>
+              <p id="painel-subtitulo" class="passo-ajuda">Gestão inteligente para uma cidade melhor.</p>
             </div>
-          </div>
+          </header>
 
           <div id="panel-occurrences" class="tab-panel">
-            <div class="stats">
-              <div>Total: <strong id="total-count">0</strong></div>
-              <div>Recebido: <strong id="pending-count">0</strong></div>
-              <div>Em andamento: <strong id="progress-count">0</strong></div>
-              <div>Concluído: <strong id="resolved-count">0</strong></div>
+            <div class="prod-tiles kpi-row">
+              <div class="prod-tile kpi-total"><span class="valor" id="total-count">0</span><span class="rotulo">Total de ocorrências</span></div>
+              <div class="prod-tile kpi-recebido"><span class="valor" id="pending-count">0</span><span class="rotulo">Recebidas (aguardando ação)</span></div>
+              <div class="prod-tile kpi-andamento"><span class="valor" id="progress-count">0</span><span class="rotulo">Em andamento</span></div>
+              <div class="prod-tile kpi-concluido"><span class="valor" id="resolved-count">0</span><span class="rotulo">Concluídas</span></div>
             </div>
 
             <div id="map" class="admin-map"></div>
@@ -223,10 +226,7 @@
 
           <div id="panel-executive" class="tab-panel hidden">
             <div class="prod-header">
-              <div>
-                <h3>Visão executiva</h3>
-                <p class="preview-label">A cidade em números: o que entra, o que está parado e onde agir primeiro.</p>
-              </div>
+              <div></div>
               <label class="prod-period">
                 Período
                 <select id="exec-period">
@@ -239,9 +239,20 @@
             </div>
             <div id="exec-tiles" class="prod-tiles" aria-live="polite"></div>
 
-            <div class="exec-grid">
+            <div class="exec-grid exec-grid-3">
+              <section class="exec-card exec-span-2">
+                <h4>Evolução das ocorrências <small class="exec-nota">recebidas e concluídas por dia</small></h4>
+                <div id="exec-evolution" class="exec-chart"></div>
+              </section>
               <section class="exec-card">
-                <h4>Problemas mais recorrentes</h4>
+                <h4>Ocorrências por status</h4>
+                <div id="exec-status" class="exec-donut"></div>
+              </section>
+            </div>
+
+            <div class="exec-grid exec-grid-3">
+              <section class="exec-card">
+                <h4>Principais demandas</h4>
                 <ul id="exec-categories" class="rank-list"></ul>
               </section>
               <section class="exec-card">
@@ -249,14 +260,26 @@
                 <ul id="exec-neighborhoods" class="rank-list"></ul>
               </section>
               <section class="exec-card">
+                <h4>Desempenho das secretarias <small class="exec-nota">taxa de conclusão</small></h4>
+                <ul id="exec-performance" class="rank-list"></ul>
+              </section>
+            </div>
+
+            <div class="exec-grid">
+              <section class="exec-card">
                 <h4>Atrasos por secretaria</h4>
                 <ul id="exec-secretariats" class="rank-list"></ul>
               </section>
               <section class="exec-card">
-                <h4>Abertas há mais tempo</h4>
+                <h4>Ocorrências críticas <small class="exec-nota">abertas há mais tempo</small></h4>
                 <ul id="exec-delayed" class="rank-list"></ul>
               </section>
             </div>
+
+            <section class="exec-card">
+              <h4>Metas e indicadores</h4>
+              <div id="exec-goals" class="exec-goals"></div>
+            </section>
 
             <section class="exec-card exec-ai">
               <h4>Resumo executivo por IA</h4>
@@ -376,21 +399,11 @@
             <ul id="whatsapp-checks" class="diag-list"></ul>
           </div>
 
-          <div style="margin-top:16px; display:flex; gap:10px; flex-wrap:wrap;">
-            <button id="clear-incidents-btn" class="btn btn-danger" type="button">Limpar ocorrências</button>
-            <button id="logout-btn" class="btn">Sair</button>
-          </div>
-          <div id="admin-message" class="form-message" role="status" aria-live="polite"></div>
-        </div>
-      </section>
-    </main>
 
-    <footer class="footer">
-      <div class="container footer-content">
-        <p>SmartGov 360 — Aplicação demonstrativa de gestão municipal</p>
-        <p>© <span id="year"></span></p>
+          <div id="admin-message" class="form-message" role="status" aria-live="polite"></div>
+        </section>
       </div>
-    </footer>
+    </main>
 
     <dialog id="conclude-modal" class="geo-modal" aria-labelledby="conclude-modal-title">
       <div class="geo-modal-content">

@@ -504,9 +504,39 @@ function criarIncidentes({ diretorioDados, papelAdminSistema }) {
 
     const notas = todas.filter((i) => i.avaliacao).map((i) => Number(i.avaliacao.nota));
 
+    // Serie diaria de recebidas e concluidas (ate 90 dias) para o grafico.
+    const diasSerie = Math.min(dias > 0 ? dias : 90, 90);
+    const serie = [];
+    const chaveDia = (iso) => {
+      const t = Date.parse(iso || '');
+      if (!Number.isFinite(t)) return null;
+      const d = new Date(t);
+      return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+    };
+    const recebidasPorDia = new Map();
+    const concluidasPorDia = new Map();
+    for (const item of todas) {
+      const r = chaveDia(item.createdAt);
+      if (r) recebidasPorDia.set(r, (recebidasPorDia.get(r) || 0) + 1);
+      if (item.status === STATUS_FINAL) {
+        const c = chaveDia(item.concluidoEm || item.updatedAt);
+        if (c) concluidasPorDia.set(c, (concluidasPorDia.get(c) || 0) + 1);
+      }
+    }
+    for (let i = diasSerie - 1; i >= 0; i--) {
+      const d = new Date(agora - i * 86400000);
+      const chave = chaveDia(d.toISOString());
+      serie.push({ dia: chave, recebidas: recebidasPorDia.get(chave) || 0, concluidas: concluidasPorDia.get(chave) || 0 });
+    }
+
+    for (const s of secretarias) {
+      s.taxaConclusao = s.total ? Math.round(((s.total - s.abertas) / s.total) * 100) : null;
+    }
+
     return {
       dias,
       limiteAtrasoDias,
+      serie,
       geradoEm: new Date(agora).toISOString(),
       totais: {
         historico: todas.length,
@@ -515,6 +545,7 @@ function criarIncidentes({ diretorioDados, papelAdminSistema }) {
         recebidas: abertas.filter((i) => i.status === STATUS_INICIAL).length,
         emAndamento: abertas.filter((i) => i.status === 'Em andamento').length,
         concluidasNoPeriodo: concluidasNoPeriodo.length,
+        concluidas: todas.filter((i) => i.status === STATUS_FINAL).length,
         taxaConclusao: doPeriodo.length ? Math.round((doPeriodo.filter((i) => i.status === STATUS_FINAL).length / doPeriodo.length) * 100) : null,
         horasMediasConclusao: horasMedias,
         atrasadas: atrasadas.length,

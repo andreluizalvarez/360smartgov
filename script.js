@@ -661,6 +661,14 @@ async function showAdminDashboard(user) {
   }
 
   updateTabVisibilityByRole();
+  const sbUser = document.getElementById('sidebar-user');
+  const sbRole = document.getElementById('sidebar-role');
+  const sbAvatar = document.getElementById('sidebar-avatar');
+  if (sbUser) sbUser.textContent = user?.username || '—';
+  if (sbRole) sbRole.textContent = isSystemAdmin(user) ? 'Gabinete · administrador do sistema' : 'Secretaria · ' + ((user?.allowedCategories || []).join(', ') || 'sem categorias');
+  if (sbAvatar) sbAvatar.textContent = (user?.username || '?').slice(0, 2).toUpperCase();
+  // O prefeito abre na Visao do Prefeito; a secretaria, nas suas ocorrencias.
+  switchTab(isSystemAdmin(user) ? 'executive' : 'occurrences');
   await carregarIncidentesDoServidor();
   refreshDashboard();
   if (isSystemAdmin()) {
@@ -1385,7 +1393,7 @@ function renderIncidents(incidents) {
         <td>${item.category}</td>
         <td>${item.priority}</td>
         <td>
-          <span class="status-badge">${item.status}</span>
+          <span class="status-badge" data-status="${escapeHtml(item.status)}">${escapeHtml(item.status)}</span>
         </td>
         <td>
           <textarea class="work-update-input" data-id="${item.id}" rows="3" placeholder="Descreva o que está sendo feito...">${escapeHtml(item.workUpdate || '')}</textarea>
@@ -2255,8 +2263,126 @@ function linkOcorrencia(id, texto) {
   return `<a href="#" class="incident-link" data-open-incident="${escapeHtml(id)}">${escapeHtml(texto)}</a>`;
 }
 
+// Linhas de recebidas e concluidas por dia (uma serie por cor, legenda e valores finais).
+function renderEvolucao(serie) {
+  const el = document.getElementById('exec-evolution');
+  if (!el) return;
+  if (!serie || serie.length < 2 || !serie.some((p) => p.recebidas || p.concluidas)) {
+    el.innerHTML = '<p class="exec-vazio">Sem ocorrências no período para traçar a evolução.</p>';
+    return;
+  }
+  const W = Math.max(320, Math.round(el.clientWidth || 600));
+  const H = 200;
+  const m = { top: 12, right: 16, bottom: 28, left: 34 };
+  const maxY = Math.max(1, ...serie.map((p) => Math.max(p.recebidas, p.concluidas)));
+  const passoY = maxY <= 5 ? 1 : Math.ceil(maxY / 4);
+  const topoY = Math.ceil(maxY / passoY) * passoY;
+  const x = (i) => m.left + (i / (serie.length - 1)) * (W - m.left - m.right);
+  const y = (v) => m.top + (1 - v / topoY) * (H - m.top - m.bottom);
+  const caminho = (k) => serie.map((p, i) => (i ? 'L' : 'M') + x(i).toFixed(1) + ',' + y(p[k]).toFixed(1)).join(' ');
+  const area = caminho('recebidas') + ` L${x(serie.length - 1).toFixed(1)},${y(0)} L${x(0).toFixed(1)},${y(0)} Z`;
+  const grade = [];
+  for (let v = 0; v <= topoY; v += passoY) {
+    grade.push(`<line class="grade" x1="${m.left}" x2="${W - m.right}" y1="${y(v)}" y2="${y(v)}" /><text class="eixo-texto" x="${m.left - 6}" y="${y(v) + 4}" text-anchor="end">${v}</text>`);
+  }
+  const rotulos = [];
+  const passoX = Math.max(1, Math.round(serie.length / 6));
+  serie.forEach((p, i) => {
+    if (i % passoX === 0 || i === serie.length - 1) {
+      const [, mes, dia] = p.dia.split('-');
+      rotulos.push(`<text class="eixo-texto" x="${x(i)}" y="${H - 8}" text-anchor="middle">${dia}/${mes}</text>`);
+    }
+  });
+  const ultimo = serie[serie.length - 1];
+  const pontos = `<circle class="ponto ponto-recebidas" r="4" cx="${x(serie.length - 1)}" cy="${y(ultimo.recebidas)}"><title>Recebidas em ${ultimo.dia}: ${ultimo.recebidas}</title></circle>
+    <circle class="ponto ponto-concluidas" r="4" cx="${x(serie.length - 1)}" cy="${y(ultimo.concluidas)}"><title>Concluídas em ${ultimo.dia}: ${ultimo.concluidas}</title></circle>`;
+  const hits = serie.map((p, i) => `<rect x="${x(i) - (W - m.left - m.right) / serie.length / 2}" y="${m.top}" width="${(W - m.left - m.right) / serie.length}" height="${H - m.top - m.bottom}" fill="transparent"><title>${p.dia.split('-').reverse().join('/')}: ${p.recebidas} recebida(s), ${p.concluidas} concluída(s)</title></rect>`).join('');
+  el.innerHTML = `
+    <div class="exec-legenda"><span><i style="background:var(--azul)"></i>Recebidas</span><span><i style="background:var(--verde-ok)"></i>Concluídas</span></div>
+    <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Evolução diária de ocorrências recebidas e concluídas">
+      ${grade.join('')}
+      <path class="area-recebidas" d="${area}" />
+      <path class="linha-recebidas" d="${caminho('recebidas')}" />
+      <path class="linha-concluidas" d="${caminho('concluidas')}" />
+      ${pontos}${rotulos.join('')}${hits}
+    </svg>`;
+}
+
+// Rosca de status: cores de estado (nunca reutilizadas como serie) + legenda com valores.
+function renderDonutStatus(t) {
+  const el = document.getElementById('exec-status');
+  if (!el) return;
+  const fatias = [
+    ['Concluídas', t.concluidas || 0, '#1f9d55'],
+    ['Em andamento', t.emAndamento || 0, '#f0a92c'],
+    ['Recebidas (aguardando ação)', t.recebidas || 0, '#e3342f']
+  ];
+  const total = fatias.reduce((a, f) => a + f[1], 0);
+  if (!total) {
+    el.innerHTML = '<p class="exec-vazio">Nenhuma ocorrência registrada.</p>';
+    return;
+  }
+  const R = 60;
+  const C = 2 * Math.PI * R;
+  let acumulado = 0;
+  const arcos = fatias.filter((f) => f[1] > 0).map(([nome, valor, cor]) => {
+    const frac = valor / total;
+    const dash = `${(frac * C - 3).toFixed(2)} ${(C - frac * C + 3).toFixed(2)}`;
+    const rot = (acumulado / total) * 360 - 90;
+    acumulado += valor;
+    return `<circle r="${R}" cx="75" cy="75" fill="none" stroke="${cor}" stroke-width="18" stroke-dasharray="${dash}" transform="rotate(${rot} 75 75)"><title>${nome}: ${valor} (${Math.round(frac * 100)}%)</title></circle>`;
+  }).join('');
+  el.innerHTML = `
+    <svg viewBox="0 0 150 150" role="img" aria-label="Ocorrências por status">
+      ${arcos}
+      <text class="donut-centro" x="75" y="72" text-anchor="middle">${total}</text>
+      <text class="donut-sub" x="75" y="88" text-anchor="middle">ocorrências</text>
+    </svg>
+    <ul>${fatias.map(([nome, valor, cor]) => `<li><span><i class="legenda-ponto" style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${cor};margin-right:.4rem"></i>${nome}</span><b>${valor}</b></li>`).join('')}</ul>`;
+}
+
+function renderDesempenho(secretarias) {
+  const el = document.getElementById('exec-performance');
+  if (!el) return;
+  const lista = (secretarias || []).filter((s) => s.total > 0).sort((a, b) => (b.taxaConclusao || 0) - (a.taxaConclusao || 0));
+  if (!lista.length) {
+    el.innerHTML = '<li class="vazio">Nenhuma secretaria com ocorrências.</li>';
+    return;
+  }
+  el.innerHTML = lista.map((s) => {
+    const taxa = s.taxaConclusao || 0;
+    const cor = taxa >= 80 ? 'var(--verde-ok)' : taxa >= 60 ? 'var(--amarelo)' : '#e3342f';
+    return `<li><span class="rank-nome"><strong>${escapeHtml(s.username)}</strong><small>${escapeHtml(s.categorias.join(', ') || '—')}</small></span><span class="rank-barra"><i style="width:${taxa}%;background:${cor}"></i></span><span class="rank-num">${taxa}%<small> · ${s.total - s.abertas}/${s.total}</small></span></li>`;
+  }).join('');
+}
+
+// Meias-roscas de meta: taxa de conclusao, tempo medio e nota do cidadao.
+function renderMetas(t) {
+  const el = document.getElementById('exec-goals');
+  if (!el) return;
+  const metas = [
+    { valor: t.taxaConclusao, texto: t.taxaConclusao !== null ? t.taxaConclusao + '%' : '—', frac: (t.taxaConclusao || 0) / 100, nome: 'Taxa de conclusão no período', meta: 'Meta: 80%', bom: (t.taxaConclusao || 0) >= 80 },
+    { valor: t.horasMediasConclusao, texto: t.horasMediasConclusao !== null ? (t.horasMediasConclusao / 24).toLocaleString('pt-BR', { maximumFractionDigits: 1 }) : '—', frac: t.horasMediasConclusao !== null ? Math.max(0, 1 - (t.horasMediasConclusao / 24) / 10) : 0, nome: 'Tempo médio de atendimento (dias)', meta: 'Meta: 5 dias', bom: t.horasMediasConclusao !== null && t.horasMediasConclusao / 24 <= 5 },
+    { valor: t.notaMedia, texto: t.notaMedia !== null ? t.notaMedia.toLocaleString('pt-BR') : '—', frac: (t.notaMedia || 0) / 5, nome: 'Nota do cidadão (satisfação)', meta: 'Meta: 4,0', bom: (t.notaMedia || 0) >= 4 }
+  ];
+  const L = Math.PI * 60;
+  el.innerHTML = metas.map((m) => `
+    <div class="exec-goal">
+      <svg viewBox="0 0 150 90" role="img" aria-label="${m.nome}: ${m.texto}">
+        <path class="arco-fundo" d="M15,80 A60,60 0 0 1 135,80" />
+        <path class="arco" d="M15,80 A60,60 0 0 1 135,80" stroke="${m.valor === null ? '#e6ebf2' : m.bom ? 'var(--verde-ok)' : 'var(--amarelo)'}" stroke-dasharray="${(Math.min(1, Math.max(0, m.frac)) * L).toFixed(1)} ${L.toFixed(1)}" />
+        <text class="arco-valor" x="75" y="78" text-anchor="middle">${m.texto}</text>
+      </svg>
+      <strong>${m.nome}</strong><small>${m.meta}</small>
+    </div>`).join('');
+}
+
 function renderExecutivo(d) {
   const t = d.totais;
+  renderEvolucao(d.serie);
+  renderDonutStatus(t);
+  renderDesempenho(d.secretarias);
+  renderMetas(t);
   if (execTiles) {
     const tiles = [
       [t.noPeriodo, 'ocorrências no período'],
@@ -2292,6 +2418,7 @@ async function carregarExecutivo() {
       showMessage(execMessage, dados.error || 'Não foi possível carregar a visão executiva.', true);
       return;
     }
+    ultimoExecutivo = dados;
     renderExecutivo(dados);
     showMessage(execMessage, '', false);
   } catch (error) {
@@ -2455,7 +2582,9 @@ function renderProdTable(usuarios) {
 
 let ultimaProdutividade = null;
 let prodResizeTimer = null;
+let ultimoExecutivo = null;
 window.addEventListener('resize', () => {
+  if (ultimoExecutivo && panelExecutive && !panelExecutive.classList.contains('hidden')) renderEvolucao(ultimoExecutivo.serie);
   if (!ultimaProdutividade || !panelProductivity || panelProductivity.classList.contains('hidden')) return;
   clearTimeout(prodResizeTimer);
   prodResizeTimer = setTimeout(() => renderProdChart(ultimaProdutividade.usuarios), 150);
@@ -3006,6 +3135,29 @@ if (tabPassword) tabPassword.addEventListener('click', () => switchTab('password
 if (tabNotifications) tabNotifications.addEventListener('click', () => switchTab('notifications'));
 if (tabProductivity) tabProductivity.addEventListener('click', () => switchTab('productivity'));
 if (tabExecutive) tabExecutive.addEventListener('click', () => switchTab('executive'));
+
+// Titulo e subtitulo do conteudo acompanham a aba ativa (painel com barra lateral).
+const TITULOS_PAINEL = {
+  executive: ['Visão do Prefeito', 'Gestão inteligente para uma cidade melhor.'],
+  occurrences: ['Ocorrências', 'Acompanhe, atualize e conclua as solicitações dos cidadãos.'],
+  productivity: ['Produtividade', 'Desempenho das secretarias nas ocorrências.'],
+  categories: ['Categorias', 'Tipos de problema que o cidadão pode registrar.'],
+  priorities: ['Prioridades', 'Níveis de prioridade usados na classificação.'],
+  users: ['Usuários', 'Secretarias e administradores com acesso ao painel.'],
+  notifications: ['Notificações', 'E-mail e WhatsApp enviados ao cidadão.'],
+  password: ['Minha senha', 'Troque a senha de acesso ao painel.']
+};
+const switchTabOriginal = switchTab;
+switchTab = function (tab) {
+  switchTabOriginal(tab);
+  const ativo = document.querySelector('.sidebar-nav .tab-button.active');
+  const chave = ativo ? ativo.id.replace('tab-', '') : tab;
+  const [titulo, sub] = TITULOS_PAINEL[chave] || TITULOS_PAINEL.occurrences;
+  const h1 = document.getElementById('painel-titulo');
+  const p = document.getElementById('painel-subtitulo');
+  if (h1) h1.textContent = titulo;
+  if (p) p.textContent = sub;
+};
 
 if (newAdminRoleSelect) {
   newAdminRoleSelect.addEventListener('change', updateAdminRoleUi);

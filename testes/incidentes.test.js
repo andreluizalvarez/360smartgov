@@ -294,6 +294,8 @@ async function esperarServidor() {
         ok(exec.corpo.porCategoria.length === 2 && exec.corpo.porCategoria[0].total === 1, 'ocorrencias por categoria');
         ok(exec.corpo.secretarias.some((s) => s.username === 'operador' && s.concluidasNoPeriodo === 1), 'secretarias com concluidas no periodo');
         ok(exec.corpo.totais.notaMedia === 4 && exec.corpo.totais.avaliacoes === 1, 'nota media da cidade');
+        ok(Array.isArray(exec.corpo.serie) && exec.corpo.serie.length === 30 && exec.corpo.serie[29].recebidas === 2, 'serie diaria com as recebidas de hoje');
+        ok(exec.corpo.totais.concluidas === 1 && typeof exec.corpo.secretarias[0].taxaConclusao === 'number', 'concluidas totais e taxa por secretaria');
         const resumo = await pedir('POST', '/api/incidentes/executivo/resumo', { dias: 30 }, token);
         ok(resumo.status === 503 && /OPENAI/.test(resumo.corpo.error), 'sem chave da IA o resumo explica a indisponibilidade');
       }

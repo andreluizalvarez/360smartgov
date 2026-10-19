@@ -393,6 +393,7 @@ function criarIncidentes({ diretorioDados, papelAdminSistema }) {
         categorias: usuario.allowedCategories || [],
         naCategoria: daCategoria.length,
         abertasNaCategoria: daCategoria.filter((item) => item.status !== STATUS_FINAL).length,
+        concluidasNaCategoria: daCategoria.filter((item) => item.status === STATUS_FINAL && noPeriodo(item.concluidoEm || item.updatedAt)).length,
         novasNoPeriodo: daCategoria.filter((item) => noPeriodo(item.createdAt)).length,
         ocorrenciasTocadas: ocorrenciasTocadas.size,
         mudancasStatus,
@@ -474,10 +475,36 @@ function criarIncidentes({ diretorioDados, papelAdminSistema }) {
       .filter((h) => Number.isFinite(h) && h >= 0);
     const horasMedias = horas.length ? Math.round((horas.reduce((a, b) => a + b, 0) / horas.length) * 10) / 10 : null;
 
+    const dataCurta = (iso) => (iso ? iso.slice(0, 10) : '');
+    const resumir = (i) => ({
+      id: i.id,
+      protocolo: i.protocolo,
+      title: i.title,
+      category: i.category,
+      priority: i.priority,
+      bairro: i.neighborhood || i.city || '',
+      status: i.status,
+      criadaEm: dataCurta(i.createdAt),
+      atualizadaEm: dataCurta(i.updatedAt || i.createdAt),
+      concluidaEm: dataCurta(i.concluidoEm),
+      diasAberta: Math.floor(diasDesde(i.createdAt, agora) || 0)
+    });
+
+    // Criterios (tambem exibidos no painel):
+    // - atrasada: aberta ha mais de `limiteAtrasoDias` dias (padrao 7);
+    // - critica: atrasada E (prioridade Alta/Urgente OU aberta ha mais de 15 dias).
+    const LIMITE_CRITICA_DIAS = 15;
+    const prioridadeAlta = (p) => /urgente|alta/i.test(p || '');
     const atrasadas = abertas
-      .map((i) => ({ id: i.id, title: i.title, category: i.category, bairro: i.neighborhood || i.city || '', status: i.status, diasAberta: Math.floor(diasDesde(i.createdAt, agora) || 0) }))
+      .map(resumir)
       .filter((i) => i.diasAberta >= limiteAtrasoDias)
       .sort((a, b) => b.diasAberta - a.diasAberta);
+    const criticas = atrasadas
+      .filter((i) => prioridadeAlta(i.priority) || i.diasAberta >= LIMITE_CRITICA_DIAS)
+      .map((i) => ({
+        ...i,
+        motivo: [prioridadeAlta(i.priority) ? 'prioridade ' + i.priority : null, i.diasAberta >= LIMITE_CRITICA_DIAS ? 'aberta há ' + i.diasAberta + ' dias' : null].filter(Boolean).join(' e ')
+      }));
 
     const secretarias = (usuarios || [])
       .filter((u) => u.role !== papelAdminSistema)
@@ -549,14 +576,18 @@ function criarIncidentes({ diretorioDados, papelAdminSistema }) {
         taxaConclusao: doPeriodo.length ? Math.round((doPeriodo.filter((i) => i.status === STATUS_FINAL).length / doPeriodo.length) * 100) : null,
         horasMediasConclusao: horasMedias,
         atrasadas: atrasadas.length,
+        criticas: criticas.length,
         notaMedia: notas.length ? Math.round((notas.reduce((a, b) => a + b, 0) / notas.length) * 10) / 10 : null,
         avaliacoes: notas.length
       },
       porCategoria: porCategoria.slice(0, 10),
       porBairro: porBairro.slice(0, 10),
       secretarias,
+      hoje: dataCurta(new Date(agora).toISOString()),
+      criterios: { atrasada: 'aberta há mais de ' + limiteAtrasoDias + ' dias', critica: 'atrasada e com prioridade Alta/Urgente, ou aberta há mais de ' + LIMITE_CRITICA_DIAS + ' dias' },
       atrasadas: atrasadas.slice(0, 40),
-      recentes: doPeriodo.slice(0, 40).map((i) => ({ id: i.id, title: i.title, category: i.category, bairro: i.neighborhood || i.city || '', status: i.status, diasAberta: Math.floor(diasDesde(i.createdAt, agora) || 0), nota: i.avaliacao?.nota ?? null }))
+      criticas: criticas.slice(0, 40),
+      recentes: doPeriodo.slice(0, 60).map((i) => ({ ...resumir(i), nota: i.avaliacao?.nota ?? null }))
     };
   }
 

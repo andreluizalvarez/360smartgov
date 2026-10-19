@@ -529,3 +529,216 @@
   .exec-span-2 { grid-column: auto; }
   .exec-donut { grid-template-columns: 1fr; justify-items: center; }
 }
+
+/* ---------- filtros e tabela de ocorrencias ---------- */
+.filtros-lista {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  margin: 0.9rem 0;
+}
+
+.filtros-lista input[type="search"] {
+  flex: 1 1 260px;
+  min-width: 0;
+}
+
+.filtros-lista select {
+  flex: 0 1 180px;
+  width: auto;
+}
+
+.filtro-contagem {
+  margin-left: auto;
+  font-size: 0.88rem;
+  color: var(--cinza-texto);
+}
+
+.tabela-ocorrencias th,
+.tabela-ocorrencias td {
+  padding: 0.6rem 0.6rem;
+  vertical-align: middle;
+}
+
+.tabela-ocorrencias tbody tr {
+  cursor: pointer;
+}
+
+.tabela-ocorrencias tbody tr:hover {
+  background: var(--cinza-fundo);
+}
+
+.tabela-ocorrencias .col-titulo strong {
+  display: block;
+}
+
+.tabela-ocorrencias .col-titulo small {
+  color: var(--cinza-texto);
+}
+
+.tabela-ocorrencias .seta {
+  color: var(--cinza-texto);
+}
+
+.tabela-ocorrencias td.num,
+.tabela-ocorrencias .data {
+  white-space: nowrap;
+  color: var(--cinza-texto);
+  font-size: 0.88rem;
+}
+
+/* ---------- dialogo de detalhes ---------- */
+.detalhe-modal {
+  width: min(1000px, calc(100vw - 2rem));
+  max-height: calc(100vh - 2rem);
+}
+
+.detalhe-conteudo {
+  padding: 1.3rem 1.5rem 1.5rem;
+}
+
+.detalhe-topo {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  margin-bottom: 0.9rem;
+}
+
+.detalhe-topo h3 {
+  margin: 0 0 0.3rem;
+}
+
+.btn-fechar {
+  border: 0;
+  background: var(--cinza-fundo);
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  font-size: 1.3rem;
+  cursor: pointer;
+  color: var(--tinta);
+}
+
+.detalhe-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 1.2rem;
+}
+
+.detalhe-coluna {
+  min-width: 0;
+}
+
+.detalhe-conteudo .preview-image {
+  width: 100%;
+  max-height: 280px;
+  object-fit: cover;
+  border-radius: 12px;
+}
+
+.detalhe-conteudo .preview-details p {
+  margin: 0.35rem 0;
+  font-size: 0.93rem;
+  overflow-wrap: anywhere;
+}
+
+.detalhe-acoes {
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--azul-borda);
+  border-radius: 12px;
+  background: var(--azul-claro);
+  margin-bottom: 0.9rem;
+}
+
+.detalhe-acoes h4 {
+  margin: 0 0 0.5rem;
+}
+
+.detalhe-acoes label {
+  display: block;
+  margin: 0.5rem 0 0.25rem;
+  font-size: 0.88rem;
+}
+
+.detalhe-acoes select,
+.detalhe-acoes textarea {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.detalhe-acoes .btn-azul {
+  margin-top: 0.6rem;
+}
+
+.detalhe-somente-leitura {
+  padding: 0.7rem 0.9rem;
+  border-radius: 10px;
+  background: var(--cinza-fundo);
+  color: var(--cinza-texto);
+  font-size: 0.9rem;
+}
+
+/* ---------- avisos ---------- */
+.aviso-flutuante {
+  position: fixed;
+  top: 80px;
+  right: 1.2rem;
+  z-index: 1000;
+  max-width: 380px;
+  padding: 0.85rem 1.1rem;
+  border-radius: 12px;
+  background: #15381f;
+  color: #fff;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.2);
+  font-size: 0.93rem;
+  animation: aviso-entra 0.2s ease-out;
+}
+
+.aviso-flutuante.erro {
+  background: #8b2a2a;
+}
+
+@keyframes aviso-entra {
+  from { opacity: 0; transform: translateY(-6px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* ---------- visao executiva: listas compactas ---------- */
+.exec-card .rank-list {
+  max-height: 330px;
+  overflow-y: auto;
+  padding-right: 0.2rem;
+}
+
+#exec-secretariats li,
+#exec-performance li {
+  align-items: start;
+}
+
+.exec-motivo {
+  display: inline-block;
+  margin-top: 0.15rem;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  background: #fff4dc;
+  color: #8a5a00;
+  font-size: 0.78rem;
+}
+
+@media (max-width: 760px) {
+  .detalhe-grid {
+    grid-template-columns: 1fr;
+  }
+  .filtros-lista select {
+    flex: 1 1 45%;
+  }
+}
+
+/* O tamanho padrao dos icones (24px) nao vale para o grafico de produtividade. */
+.pagina-painel .prod-chart-body svg {
+  width: auto;
+  max-width: 100%;
+  height: auto;
+}

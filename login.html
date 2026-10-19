@@ -85,17 +85,40 @@
             </div>
 
             <div id="map" class="admin-map"></div>
+            <p id="map-note" class="passo-ajuda" hidden></p>
+
+            <div class="filtros-lista" role="search" aria-label="Filtrar ocorrências">
+              <input id="filter-text" type="search" placeholder="Buscar por protocolo, título, bairro ou descrição" />
+              <select id="filter-status" aria-label="Status">
+                <option value="">Todos os status</option>
+                <option value="Recebido">Recebido</option>
+                <option value="Em andamento">Em andamento</option>
+                <option value="Concluído">Concluído</option>
+              </select>
+              <select id="filter-category" aria-label="Categoria"><option value="">Todas as categorias</option></select>
+              <select id="filter-priority" aria-label="Prioridade"><option value="">Todas as prioridades</option></select>
+              <select id="filter-period" aria-label="Período">
+                <option value="0">Todo o período</option>
+                <option value="7">Últimos 7 dias</option>
+                <option value="30">Últimos 30 dias</option>
+                <option value="90">Últimos 90 dias</option>
+              </select>
+              <button type="button" id="filter-clear" class="btn-link">Limpar filtros</button>
+              <span id="filter-count" class="filtro-contagem"></span>
+            </div>
 
             <div class="table-wrap">
-              <table class="table">
+              <table class="table tabela-ocorrencias">
                 <thead>
                   <tr>
-                    <th>Resumo / Descrição</th>
+                    <th>Protocolo</th>
+                    <th>Ocorrência</th>
                     <th>Categoria</th>
                     <th>Prioridade</th>
                     <th>Status</th>
-                    <th>Atualização da equipe</th>
-                    <th>Ações</th>
+                    <th>Aberta em</th>
+                    <th>Última atualização</th>
+                    <th></th>
                   </tr>
                 </thead>
                 <tbody id="incident-list">
@@ -104,40 +127,62 @@
               </table>
             </div>
             <nav id="incident-pager" class="pager" aria-label="Paginação das ocorrências"></nav>
+          </div>
 
-            <div id="incident-detail-panel" class="tab-panel hidden" aria-hidden="true">
-              <div class="section-heading">
-                <p class="eyebrow">Detalhes da ocorrência</p>
-                <h3 id="detail-title">Carregando...</h3>
-              </div>
-              <div class="preview-image-wrap">
-                <img id="detail-image" class="preview-image" alt="Foto da ocorrência" src="" />
-              </div>
-              <div class="preview-details">
-                <p><strong>Categoria:</strong> <span id="detail-category"></span></p>
-                <p><strong>Prioridade:</strong> <span id="detail-priority"></span></p>
-                <p><strong>Nome:</strong> <span id="detail-name"></span></p>
-                <p><strong>E-mail:</strong> <span id="detail-email"></span></p>
-                <p><strong>Endereço:</strong> <span id="detail-address"></span></p>
-                <p><strong>Telefone:</strong> <span id="detail-phone"></span></p>
-                <p><strong>Descrição:</strong></p>
-                <p id="detail-description"></p>
-                <p><strong>Atualização da equipe:</strong></p>
-                <p id="detail-work-update"></p>
-                <p><strong>Última atualização por:</strong> <span id="detail-work-meta"></span></p>
-                <div id="detail-conclusion-wrap" hidden>
-                  <p><strong>Resposta ao cidadão na conclusão:</strong></p>
-                  <p id="detail-conclusion"></p>
+          <dialog id="incident-detail-panel" class="geo-modal detalhe-modal" aria-labelledby="detail-title">
+            <div class="geo-modal-content detalhe-conteudo">
+              <div class="detalhe-topo">
+                <div>
+                  <p class="eyebrow">Detalhes da ocorrência</p>
+                  <h3 id="detail-title">Carregando...</h3>
+                  <span id="detail-status" class="status-badge"></span>
                 </div>
-                <p><strong>Avaliação do cidadão:</strong> <span id="detail-rating"></span></p>
-                <p><strong>Histórico:</strong></p>
-                <ul id="detail-work-history" class="work-history-list"></ul>
+                <button id="detail-close" class="btn-fechar" type="button" aria-label="Fechar">×</button>
               </div>
-              <div style="margin-top:12px; display:flex; gap:8px;">
-                <button id="detail-close" class="btn">Fechar</button>
+              <div class="detalhe-grid">
+                <div class="detalhe-coluna">
+                  <div class="preview-image-wrap">
+                    <img id="detail-image" class="preview-image" alt="Foto da ocorrência" src="" />
+                  </div>
+                  <div class="preview-details">
+                    <p><strong>Categoria:</strong> <span id="detail-category"></span> · <strong>Prioridade:</strong> <span id="detail-priority"></span></p>
+                    <p><strong>Endereço:</strong> <span id="detail-address"></span></p>
+                    <p><strong>Descrição:</strong></p>
+                    <p id="detail-description"></p>
+                    <p><strong>Cidadão:</strong> <span id="detail-name"></span> <span id="detail-email"></span> <span id="detail-phone"></span></p>
+                    <p><strong>Avaliação do cidadão:</strong> <span id="detail-rating"></span></p>
+                  </div>
+                </div>
+                <div class="detalhe-coluna">
+                  <section id="detail-actions" class="detalhe-acoes">
+                    <h4>Atendimento</h4>
+                    <label for="detail-status-select">Status</label>
+                    <select id="detail-status-select" class="status-select">
+                      <option value="Recebido">Recebido</option>
+                      <option value="Em andamento">Em andamento</option>
+                      <option value="Concluído">Concluído</option>
+                    </select>
+                    <p class="passo-ajuda">Ao mudar o status o cidadão é notificado por e-mail e WhatsApp. Concluir pede a resposta ao cidadão.</p>
+                    <label for="detail-work-input">Atualização da equipe</label>
+                    <textarea id="detail-work-input" class="work-update-input" rows="3" placeholder="Descreva o que está sendo feito..."></textarea>
+                    <button type="button" id="detail-save-work" class="btn-azul save-work-update-btn">Salvar atualização</button>
+                  </section>
+                  <p id="detail-readonly" class="detalhe-somente-leitura" hidden>Somente leitura: as atualizações de status e de atendimento são feitas pela secretaria responsável.</p>
+                  <div class="preview-details">
+                    <p><strong>Última atualização da equipe:</strong></p>
+                    <p id="detail-work-update"></p>
+                    <p><small>Por <span id="detail-work-meta"></span></small></p>
+                    <div id="detail-conclusion-wrap" hidden>
+                      <p><strong>Resposta ao cidadão na conclusão:</strong></p>
+                      <p id="detail-conclusion"></p>
+                    </div>
+                    <p><strong>Histórico:</strong></p>
+                    <ul id="detail-work-history" class="work-history-list"></ul>
+                  </div>
+                </div>
               </div>
             </div>
-          </div>
+          </dialog>
 
           <div id="panel-categories" class="tab-panel hidden">
             <h3>Gerenciar categorias</h3>
@@ -267,7 +312,7 @@
 
             <div class="exec-grid">
               <section class="exec-card">
-                <h4>Atrasos por secretaria</h4>
+                <h4>Atrasos por secretaria <small class="exec-nota">atrasada = aberta há mais de 7 dias</small></h4>
                 <ul id="exec-secretariats" class="rank-list"></ul>
               </section>
               <section class="exec-card">
@@ -288,7 +333,8 @@
                 <button type="button" class="chip" data-exec-question="Quais são os cinco problemas mais recorrentes na cidade no período?">5 problemas mais recorrentes</button>
                 <button type="button" class="chip" data-exec-question="Qual secretaria apresenta mais atrasos e por quê?">Secretaria com mais atrasos</button>
                 <button type="button" class="chip" data-exec-question="Quais bairros precisam de intervenção prioritária?">Bairros prioritários</button>
-                <button type="button" class="chip" data-exec-question="Faça um resumo executivo do período para a reunião de secretariado.">Resumo para a reunião</button>
+                <button type="button" class="chip" data-exec-question="Quais ocorrências estão críticas e por quê? Cite o número de protocolo de cada uma.">Ocorrências críticas e o motivo</button>
+                <button type="button" class="chip" data-exec-question="Quais ocorrências foram criadas hoje? Cite o número de protocolo de cada uma.">Criadas hoje</button>
               </div>
               <div class="exec-ask">
                 <input id="exec-question" type="text" placeholder="Ex.: Onde estão concentrados os buracos abertos há mais de 15 dias?" />
@@ -326,10 +372,11 @@
             </div>
 
             <div id="prod-tiles" class="prod-tiles" aria-live="polite"></div>
+            <p id="prod-explica" class="passo-ajuda"></p>
 
             <figure class="prod-chart">
               <figcaption>
-                <strong>Ocorrências resolvidas por usuário</strong>
+                <strong>Ocorrências concluídas por secretaria</strong>
                 <span class="prod-chart-note">no período selecionado</span>
               </figcaption>
               <div id="prod-chart" class="prod-chart-body"></div>
@@ -339,14 +386,11 @@
               <table class="prod-table">
                 <thead>
                   <tr>
-                    <th>Usuário</th>
-                    <th>Categorias</th>
-                    <th class="num">Resolvidas</th>
-                    <th class="num">Mudanças de status</th>
-                    <th class="num">Atualizações</th>
-                    <th class="num">Ocorrências tocadas</th>
-                    <th class="num">Tempo médio p/ resolver</th>
-                    <th class="num">Abertas nas categorias</th>
+                    <th>Secretaria</th>
+                    <th class="num">Concluídas no período</th>
+                    <th class="num">Abertas agora</th>
+                    <th class="num">Ações registradas</th>
+                    <th class="num">Tempo médio p/ concluir</th>
                     <th class="num">Nota do cidadão</th>
                     <th>Última atividade</th>
                   </tr>

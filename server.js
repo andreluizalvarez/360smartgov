@@ -375,7 +375,6 @@ function buildNotificationText(eventType, incident, actor, previousStatus, newSt
           '',
           'Agradecemos sua participação. Sua colaboração ajuda a Prefeitura a identificar problemas e melhorar os serviços da cidade.',
           ...(linkAvaliacao ? ['', 'Avalie o atendimento e deixe sua sugestão (leva menos de um minuto):', linkAvaliacao] : []),
-          ...(protocolo ? ['', `Acompanhe pelo protocolo ${protocolo} em ${SITE_URL}/index.html?protocolo=${incident.protocolo}`] : [])
         ]
       }
     };
@@ -1126,10 +1125,10 @@ app.post('/api/incidentes/executivo/resumo', auth.exigirAdminSistema, async (req
   const dias = Math.max(0, Math.min(365, Number(req.body?.dias ?? 30) || 0));
   const pergunta = (req.body?.pergunta || '').toString().trim().slice(0, 500);
   const dados = incidentes.visaoExecutiva(auth.listarUsuarios(), dias);
-  const idsValidos = new Set([...dados.atrasadas, ...dados.recentes].map((i) => i.id));
+  const idsValidos = new Set([...dados.atrasadas, ...dados.criticas, ...dados.recentes].map((i) => i.id));
 
   const perguntaPadrao = 'Quais são os cinco problemas mais recorrentes na cidade no período? Qual secretaria apresenta mais atrasos? Quais bairros precisam de intervenção prioritária?';
-  const instrucoes = `Você é o analista de dados de uma prefeitura. Responda à pergunta do prefeito usando EXCLUSIVAMENTE os dados em JSON abaixo, que são as ocorrências reais registradas pelos cidadãos no SmartGov 360. Não invente números, bairros, secretarias nem ocorrências. Se os dados não permitirem responder a algo, diga isso. Escreva em português do Brasil, direto e curto, para leitura em reunião. "Secretaria" aqui é o usuário administrador de categoria e as categorias que ele atende. Em cada conclusão, liste em "ocorrencias" os ids (campo "id") das ocorrências que a sustentam, só os que existem nos dados; a lista pode ficar vazia quando a conclusão for sobre totais.`;
+  const instrucoes = `Você é o analista de dados de uma prefeitura. Responda à pergunta do prefeito usando EXCLUSIVAMENTE os dados em JSON abaixo, que são as ocorrências reais registradas pelos cidadãos no SmartGov 360. Não invente números, bairros, secretarias nem ocorrências. Se os dados não permitirem responder a algo, diga isso. Escreva em português do Brasil, direto e curto, para leitura em reunião. "Secretaria" aqui é o usuário administrador de categoria e as categorias que ele atende. A data de hoje está no campo "hoje" (formato AAAA-MM-DD); "criadaEm" é a data de abertura, "atualizadaEm" a da última alteração e "concluidaEm" a da conclusão — não confunda criada com atualizada. Os critérios de "atrasada" e "crítica" estão em "criterios"; use-os ao responder. Sempre que citar uma ocorrência no texto, identifique-a pelo número de protocolo no formato #1234 (campo "protocolo") e pelo título. Em cada conclusão, liste em "ocorrencias" os ids (campo "id") das ocorrências que a sustentam, só os que existem nos dados e só as que de fato atendem ao que foi perguntado; a lista pode ficar vazia quando a conclusão for sobre totais.`;
 
   const esquema = {
     type: 'json_schema',

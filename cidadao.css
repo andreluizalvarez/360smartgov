@@ -181,7 +181,8 @@
 /* ---------- grade principal ---------- */
 .grade-cidadao {
   display: grid;
-  grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
+  max-width: 860px;
   gap: 1.25rem;
   margin-top: -4.6rem;
   position: relative;

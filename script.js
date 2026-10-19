@@ -1125,25 +1125,32 @@ async function initMap(incidents) {
   }
 
   const bounds = new google.maps.LatLngBounds();
-  validPoints.forEach((incident, index) => {
-    const position = { lat: Number(incident.latitude), lng: Number(incident.longitude) };
-    const marker = addMapMarker(position, incident.title || 'Ocorrência', String(index + 1), adminMap);
+  // Varias ocorrencias no mesmo ponto (mesmo endereco ou mesmo GPS) viram um
+  // marcador com a contagem, em vez de pinos empilhados que parecem um so.
+  const grupos = new Map();
+  validPoints.forEach((incident) => {
+    const chave = Number(incident.latitude).toFixed(5) + ',' + Number(incident.longitude).toFixed(5);
+    if (!grupos.has(chave)) grupos.set(chave, []);
+    grupos.get(chave).push(incident);
+  });
+  grupos.forEach((itens) => {
+    const position = { lat: Number(itens[0].latitude), lng: Number(itens[0].longitude) };
+    const marker = addMapMarker(position, itens.length === 1 ? (itens[0].title || 'Ocorrência') : itens.length + ' ocorrências neste ponto', itens.length > 1 ? String(itens.length) : null, adminMap);
     adminMarkers.push(marker);
     bounds.extend(position);
-
+    const linhas = itens.slice(0, 8).map((i) => `<div style="margin:4px 0"><a href="#" data-open-incident="${escapeHtml(i.id)}" style="font-weight:600">${Number.isInteger(i.protocolo) ? '#' + i.protocolo + ' · ' : ''}${escapeHtml(i.title || 'Ocorrência')}</a><br /><small>${escapeHtml(i.category || '')} · ${escapeHtml(i.status || '')}</small></div>`).join('');
+    const mais = itens.length > 8 ? `<small>e mais ${itens.length - 8}…</small>` : '';
     const infoWindow = new google.maps.InfoWindow({
-      content: `
-        <div style="max-width:220px;">
-          <strong>${incident.title || 'Ocorrência'}</strong><br />
-          <span>${incident.category || ''}</span><br />
-          <span>${incident.priority || ''}</span><br />
-          <small>${incident.address || buildIncidentAddress(incident) || ''}</small>
-        </div>
-      `
+      content: `<div style="max-width:260px;">${itens.length > 1 ? '<strong>' + itens.length + ' ocorrências neste ponto</strong>' : ''}${linhas}${mais}<small>${escapeHtml(itens[0].address || buildIncidentAddress(itens[0]) || '')}</small></div>`
     });
-
     marker.addListener('click', () => infoWindow.open(adminMap, marker));
   });
+  const mapNote = document.getElementById('map-note');
+  if (mapNote) {
+    const semLocal = readyIncidents.length - validPoints.length;
+    mapNote.hidden = semLocal === 0;
+    mapNote.textContent = semLocal ? `${validPoints.length} no mapa · ${semLocal} sem localização (endereço não encontrado pelo geocodificador).` : '';
+  }
 
   const userLocation = await getUserLocation();
   if (userLocation) {
@@ -1175,9 +1182,14 @@ async function initMap(incidents) {
 function refreshDashboard() {
   const incidents = getVisibleIncidents(getIncidents());
   renderStats(incidents);
-  renderIncidents(incidents);
+  atualizarOpcoesDeFiltro(incidents);
+  const filtradas = aplicarFiltros(incidents);
+  if (filterCount) {
+    filterCount.textContent = filtradas.length === incidents.length ? `${incidents.length} ocorrência(s)` : `${filtradas.length} de ${incidents.length} ocorrência(s)`;
+  }
+  renderIncidents(filtradas);
   if (adminDashboard && !adminDashboard.classList.contains('hidden') && tabOccurrences?.classList.contains('active')) {
-    initMap(incidents);
+    initMap(filtradas);
   }
 }
 
@@ -1324,6 +1336,7 @@ async function saveIncidentWorkUpdate(id, workUpdate) {
     return;
   }
   refreshDashboard();
+  atualizarDetalheAberto();
   showMessage(adminMessage, 'Atualização da ocorrência salva com sucesso.', false);
 }
 
@@ -1385,30 +1398,70 @@ function renderIncidents(incidents) {
 
   incidentList.innerHTML = pagina
     .map((item) => `
-      <tr data-id="${item.id}">
-        <td>
-          ${Number.isInteger(item.protocolo) ? `<small class="protocolo-tag">#${item.protocolo}</small> ` : ''}<strong>${item.title}</strong><br />
-          <small>${item.description}</small>
-        </td>
-        <td>${item.category}</td>
-        <td>${item.priority}</td>
-        <td>
-          <span class="status-badge" data-status="${escapeHtml(item.status)}">${escapeHtml(item.status)}</span>
-        </td>
-        <td>
-          <textarea class="work-update-input" data-id="${item.id}" rows="3" placeholder="Descreva o que está sendo feito...">${escapeHtml(item.workUpdate || '')}</textarea>
-          <button type="button" class="btn btn-secondary save-work-update-btn" data-id="${item.id}">Salvar atualização</button>
-        </td>
-        <td>
-          <select class="status-select" data-id="${item.id}">
-            <option value="Recebido" ${item.status === 'Recebido' ? 'selected' : ''}>Recebido</option>
-            <option value="Em andamento" ${item.status === 'Em andamento' ? 'selected' : ''}>Em andamento</option>
-            <option value="Concluído" ${item.status === 'Concluído' ? 'selected' : ''}>Concluído</option>
-          </select>
-        </td>
+      <tr data-id="${item.id}" tabindex="0" title="Abrir detalhes">
+        <td class="num">${Number.isInteger(item.protocolo) ? '#' + item.protocolo : '—'}</td>
+        <td class="col-titulo"><strong>${escapeHtml(item.title || 'Ocorrência')}</strong><small>${escapeHtml(item.neighborhood || item.city || item.address || '')}</small></td>
+        <td>${escapeHtml(item.category || '')}</td>
+        <td>${escapeHtml(item.priority || '')}</td>
+        <td><span class="status-badge" data-status="${escapeHtml(item.status)}">${escapeHtml(item.status)}</span></td>
+        <td class="data">${dataCurta(item.createdAt)}</td>
+        <td class="data">${dataCurta(item.updatedAt || item.workUpdatedAt || '') || '—'}</td>
+        <td class="seta" aria-hidden="true">›</td>
       </tr>
     `)
     .join('');
+}
+
+// ---------- filtros da lista ----------
+const filterText = document.getElementById('filter-text');
+const filterStatus = document.getElementById('filter-status');
+const filterCategory = document.getElementById('filter-category');
+const filterPriority = document.getElementById('filter-priority');
+const filterPeriod = document.getElementById('filter-period');
+const filterClear = document.getElementById('filter-clear');
+const filterCount = document.getElementById('filter-count');
+
+function atualizarOpcoesDeFiltro(incidents) {
+  const preencher = (select, valores, rotuloTodos) => {
+    if (!select) return;
+    const atual = select.value;
+    select.innerHTML = `<option value="">${rotuloTodos}</option>` + valores.map((v) => `<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`).join('');
+    if (valores.includes(atual)) select.value = atual;
+  };
+  preencher(filterCategory, [...new Set(incidents.map((i) => i.category).filter(Boolean))].sort(), 'Todas as categorias');
+  preencher(filterPriority, [...new Set(incidents.map((i) => i.priority).filter(Boolean))].sort(), 'Todas as prioridades');
+}
+
+function aplicarFiltros(incidents) {
+  const texto = (filterText?.value || '').trim().toLowerCase();
+  const status = filterStatus?.value || '';
+  const categoria = filterCategory?.value || '';
+  const prioridade = filterPriority?.value || '';
+  const dias = Number(filterPeriod?.value || 0);
+  const limite = dias > 0 ? Date.now() - dias * 86400000 : 0;
+  return incidents.filter((i) => {
+    if (status && i.status !== status) return false;
+    if (categoria && i.category !== categoria) return false;
+    if (prioridade && i.priority !== prioridade) return false;
+    if (limite && Date.parse(i.createdAt || '') < limite) return false;
+    if (texto) {
+      const alvo = ['#' + (i.protocolo || ''), i.title, i.description, i.neighborhood, i.city, i.street, i.name].join(' ').toLowerCase();
+      if (!alvo.includes(texto)) return false;
+    }
+    return true;
+  });
+}
+
+[filterText, filterStatus, filterCategory, filterPriority, filterPeriod].forEach((el) => {
+  if (!el) return;
+  el.addEventListener(el === filterText ? 'input' : 'change', () => { paginaAtual = 1; refreshDashboard(); });
+});
+if (filterClear) {
+  filterClear.addEventListener('click', () => {
+    [filterText, filterStatus, filterCategory, filterPriority, filterPeriod].forEach((el) => { if (el) el.value = el === filterPeriod ? '0' : ''; });
+    paginaAtual = 1;
+    refreshDashboard();
+  });
 }
 
 const detailPanel = document.getElementById('incident-detail-panel');
@@ -1460,9 +1513,9 @@ function showIncidentDetail(id) {
   if (detailCategory) detailCategory.textContent = incident.category || '';
   if (detailPriority) detailPriority.textContent = incident.priority || '';
   if (detailName) detailName.textContent = incident.name || '';
-  if (detailEmail) detailEmail.textContent = incident.email || '';
+  if (detailEmail) detailEmail.textContent = incident.email ? '· ' + incident.email : '';
   if (detailAddress) detailAddress.textContent = incident.address || `${incident.street || ''} ${incident.number || ''}`;
-  if (detailPhone) detailPhone.textContent = incident.phone || '';
+  if (detailPhone) detailPhone.textContent = incident.phone ? '· ' + incident.phone : '';
   if (detailDescription) detailDescription.textContent = incident.description || '';
   if (detailWorkUpdate) detailWorkUpdate.textContent = incident.workUpdate || 'Sem atualização registrada.';
   if (detailWorkMeta) {
@@ -1495,17 +1548,46 @@ function showIncidentDetail(id) {
       detailImage.style.display = 'none';
     }
   }
+  const detailStatus = document.getElementById('detail-status');
+  if (detailStatus) {
+    detailStatus.textContent = incident.status || '';
+    detailStatus.dataset.status = incident.status || '';
+  }
+  // Acoes de atendimento: so para a secretaria. O gabinete apenas visualiza.
+  const acoes = document.getElementById('detail-actions');
+  const somenteLeitura = document.getElementById('detail-readonly');
+  const podeAtuar = !isSystemAdmin();
+  if (acoes) {
+    acoes.hidden = !podeAtuar;
+    const sel = acoes.querySelector('.status-select');
+    const txt = acoes.querySelector('.work-update-input');
+    const btn = acoes.querySelector('.save-work-update-btn');
+    if (sel) { sel.value = incident.status || 'Recebido'; sel.dataset.id = incident.id; }
+    if (txt) { txt.value = incident.workUpdate || ''; txt.dataset.id = incident.id; }
+    if (btn) btn.dataset.id = incident.id;
+  }
+  if (somenteLeitura) somenteLeitura.hidden = podeAtuar;
   if (detailPanel) {
-    detailPanel.classList.remove('hidden');
+    detailPanel.dataset.id = incident.id;
+    if (typeof detailPanel.showModal === 'function') {
+      if (!detailPanel.open) detailPanel.showModal();
+    } else {
+      detailPanel.classList.remove('hidden');
+    }
     detailPanel.setAttribute('aria-hidden', 'false');
   }
 }
 
 function closeIncidentDetail() {
-  if (detailPanel) {
-    detailPanel.classList.add('hidden');
-    detailPanel.setAttribute('aria-hidden', 'true');
-  }
+  if (!detailPanel) return;
+  if (typeof detailPanel.close === 'function' && detailPanel.open) detailPanel.close();
+  detailPanel.classList.add('hidden');
+  detailPanel.setAttribute('aria-hidden', 'true');
+}
+
+// Depois de salvar algo, o dialogo aberto reflete a ocorrencia atualizada.
+function atualizarDetalheAberto() {
+  if (detailPanel?.open && detailPanel.dataset.id) showIncidentDetail(detailPanel.dataset.id);
 }
 
 if (detailClose) {
@@ -1514,26 +1596,29 @@ if (detailClose) {
 
 if (incidentList) {
   incidentList.addEventListener('click', (event) => {
-    const saveBtn = event.target.closest('.save-work-update-btn');
-    if (saveBtn) {
-      const id = saveBtn.dataset.id;
-      if (!id) return;
-      const row = saveBtn.closest('tr[data-id]');
-      const field = row?.querySelector('.work-update-input');
-      const workUpdate = field ? field.value.trim() : '';
-      saveIncidentWorkUpdate(id, workUpdate);
-      return;
-    }
-
-    if (event.target.closest('.work-update-input') || event.target.closest('.status-select')) {
-      return;
-    }
-
     const tr = event.target.closest('tr[data-id]');
     if (!tr) return;
     const id = tr.dataset.id;
     if (id) showIncidentDetail(id);
   });
+  incidentList.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    const tr = event.target.closest('tr[data-id]');
+    if (!tr) return;
+    event.preventDefault();
+    showIncidentDetail(tr.dataset.id);
+  });
+}
+
+if (detailPanel) {
+  detailPanel.addEventListener('click', (event) => {
+    const saveBtn = event.target.closest('.save-work-update-btn');
+    if (!saveBtn) return;
+    const id = saveBtn.dataset.id || detailPanel.dataset.id;
+    const field = detailPanel.querySelector('.work-update-input');
+    saveIncidentWorkUpdate(id, field ? field.value.trim() : '');
+  });
+  detailPanel.addEventListener('cancel', (event) => { event.preventDefault(); closeIncidentDetail(); });
 }
 
 
@@ -2389,7 +2474,7 @@ function renderExecutivo(d) {
       [t.abertas, 'abertas hoje'],
       [t.taxaConclusao !== null ? t.taxaConclusao + '%' : '—', 'concluídas no período'],
       [formatarHoras(t.horasMediasConclusao), 'tempo médio de conclusão'],
-      [t.atrasadas, `abertas há mais de ${d.limiteAtrasoDias} dias`],
+      [`${t.atrasadas} · ${t.criticas ?? 0}`, `atrasadas (> ${d.limiteAtrasoDias} dias) · críticas`],
       [t.notaMedia !== null ? t.notaMedia.toLocaleString('pt-BR') + ' / 5' : '—', `nota do cidadão (${t.avaliacoes})`]
     ];
     execTiles.innerHTML = tiles.map(([v, r]) => `<div class="prod-tile"><span class="valor">${escapeHtml(String(v))}</span><span class="rotulo">${r}</span></div>`).join('');
@@ -2403,8 +2488,10 @@ function renderExecutivo(d) {
   lista(execCategories, d.porCategoria.slice(0, 5), (c) => `<li><span class="rank-nome">${escapeHtml(c.nome)}</span><span class="rank-barra"><i style="width:${Math.round((c.total / mc) * 100)}%"></i></span><span class="rank-num">${c.total}<small> · ${c.abertas} abertas</small></span></li>`);
   const mb = max(d.porBairro, 'total');
   lista(execNeighborhoods, d.porBairro.slice(0, 5), (b) => `<li><span class="rank-nome">${escapeHtml(b.nome)}</span><span class="rank-barra"><i style="width:${Math.round((b.total / mb) * 100)}%"></i></span><span class="rank-num">${b.total}</span></li>`);
-  lista(execSecretariats, d.secretarias, (s) => `<li class="${s.atrasadas ? 'alerta' : ''}"><span class="rank-nome"><strong>${escapeHtml(s.username)}</strong><small>${escapeHtml(s.categorias.join(', ') || '—')} · ${s.abertas} abertas · ${s.concluidasNoPeriodo} concluídas${s.maisAntigaDias ? ' · mais antiga há ' + s.maisAntigaDias + ' dias' : ''}</small></span><span class="rank-num">${s.atrasadas} atrasada${s.atrasadas === 1 ? '' : 's'}</span></li>`);
-  lista(execDelayed, d.atrasadas.slice(0, 10), (i) => `<li><span class="rank-nome">${linkOcorrencia(i.id, i.title || 'Ocorrência')}<small>${escapeHtml(i.category)}${i.bairro ? ' · ' + escapeHtml(i.bairro) : ''} · ${escapeHtml(i.status)}</small></span><span class="rank-num badge-dias">${i.diasAberta} dias</span></li>`);
+  lista(execSecretariats, d.secretarias, (s) => `<li class="${s.atrasadas ? 'alerta' : ''}"><span class="rank-nome"><strong>${escapeHtml(s.username)}</strong><small>${s.abertas} abertas · ${s.concluidasNoPeriodo} concluídas no período${s.maisAntigaDias ? ' · mais antiga há ' + s.maisAntigaDias + ' dias' : ''}</small></span><span class="rank-num">${s.atrasadas} atrasada${s.atrasadas === 1 ? '' : 's'}</span></li>`);
+  const criticas = (d.criticas || []).slice(0, 12);
+  lista(execDelayed, criticas, (i) => `<li><span class="rank-nome">${linkOcorrencia(i.id, (i.protocolo ? '#' + i.protocolo + ' · ' : '') + (i.title || 'Ocorrência'))}<small>${escapeHtml(i.category)}${i.bairro ? ' · ' + escapeHtml(i.bairro) : ''} · ${escapeHtml(i.status)}</small><span class="exec-motivo">${escapeHtml(i.motivo || '')}</span></span><span class="rank-num badge-dias">${i.diasAberta} dias</span></li>`);
+  if (!criticas.length && execDelayed) execDelayed.innerHTML = '<li class="vazio">Nenhuma ocorrência crítica: nenhuma atrasada com prioridade Alta/Urgente nem aberta há mais de 15 dias.</li>';
 }
 
 async function carregarExecutivo() {
@@ -2453,7 +2540,7 @@ if (execAskBtn) {
       }
       const porId = new Map(getIncidents().map((i) => [i.id, i]));
       const refs = (ids) => ids.length
-        ? `<p class="exec-refs">Baseado em: ${ids.map((id) => linkOcorrencia(id, (porId.get(id)?.title || 'ocorrência ' + id.slice(0, 8)))).join(', ')}</p>`
+        ? `<p class="exec-refs">Baseado em: ${ids.map((id) => { const i = porId.get(id); return linkOcorrencia(id, (i && Number.isInteger(i.protocolo) ? '#' + i.protocolo + ' ' : '') + (i?.title || 'ocorrência ' + id.slice(0, 8))); }).join(', ')}</p>`
         : '';
       if (execSummary) {
         execSummary.innerHTML = `
@@ -2476,10 +2563,7 @@ document.addEventListener('click', (event) => {
   const link = event.target.closest('a[data-open-incident]');
   if (!link) return;
   event.preventDefault();
-  const id = link.dataset.openIncident;
-  switchTab('occurrences');
-  showIncidentDetail(id);
-  document.getElementById('incident-detail-panel')?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  showIncidentDetail(link.dataset.openIncident);
 });
 
 // ---------- Produtividade dos administradores de categoria ----------
@@ -2502,17 +2586,38 @@ function formatarDataHora(iso) {
   return Number.isNaN(data.getTime()) ? '—' : data.toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
 }
 
-function renderProdTiles(resumo) {
+function renderProdTiles(resumo, usuarios) {
   if (!prodTiles) return;
-  const tiles = [
-    [resumo.resolvidas, 'ocorrências resolvidas'],
-    [resumo.acoes, 'ações registradas'],
-    [`${resumo.ativos}/${resumo.usuarios}`, 'usuários ativos'],
-    [formatarHoras(resumo.horasMediasResolucao), 'tempo médio para concluir'],
-    [resumo.notaMedia !== null && resumo.notaMedia !== undefined ? resumo.notaMedia.toLocaleString('pt-BR') + ' / 5' : '—', `nota do cidadão (${resumo.avaliacoes || 0} avaliações)`]
-  ];
+  const nota = resumo.notaMedia !== null && resumo.notaMedia !== undefined ? resumo.notaMedia.toLocaleString('pt-BR') + ' / 5' : '—';
+  let tiles;
+  if (!isSystemAdmin() && usuarios && usuarios.length === 1) {
+    // Secretaria: numeros da propria secretaria, independentemente de quem atuou.
+    const u = usuarios[0];
+    tiles = [
+      [u.naCategoria, 'ocorrências da secretaria (todas)'],
+      [u.abertasNaCategoria, 'abertas agora'],
+      [u.concluidasNaCategoria, 'concluídas no período'],
+      [u.acoes, 'ações registradas por você no período'],
+      [formatarHoras(u.horasMediasResolucao), 'tempo médio para concluir (suas conclusões)'],
+      [nota, `nota do cidadão (${u.avaliacoes || 0} avaliações)`]
+    ];
+  } else {
+    tiles = [
+      [resumo.resolvidas, 'concluídas pelas secretarias no período'],
+      [resumo.acoes, 'ações registradas pelas secretarias'],
+      [`${resumo.ativos}/${resumo.usuarios}`, 'secretarias com ação no período'],
+      [formatarHoras(resumo.horasMediasResolucao), 'tempo médio para concluir'],
+      [nota, `nota do cidadão (${resumo.avaliacoes || 0} avaliações)`]
+    ];
+  }
   prodTiles.innerHTML = tiles.map(([valor, rotulo]) => `
     <div class="prod-tile"><span class="valor">${escapeHtml(String(valor))}</span><span class="rotulo">${rotulo}</span></div>`).join('');
+  const explica = document.getElementById('prod-explica');
+  if (explica) {
+    explica.textContent = isSystemAdmin()
+      ? 'Conta as ações registradas no histórico das ocorrências dentro do período selecionado: cada mudança de status e cada atualização de atendimento, atribuída a quem a fez. "Concluídas" são as que cada secretaria moveu para Concluído no período.'
+      : 'As ocorrências da secretaria são contadas pelas categorias sob sua responsabilidade. "Ações registradas" conta só o que você fez no período selecionado (mudanças de status e atualizações de atendimento); conclusões feitas por outra pessoa não entram aqui.';
+  }
 }
 
 // Barras horizontais em SVG: uma serie (sem legenda), valor na ponta, tooltip
@@ -2567,16 +2672,13 @@ function renderProdTable(usuarios) {
   }
   prodTableBody.innerHTML = usuarios.map((u) => `
     <tr>
-      <td><strong>${escapeHtml(u.username)}</strong></td>
-      <td class="categorias">${escapeHtml(u.categorias.join(', ') || '—')}</td>
-      <td class="num">${u.resolvidas}</td>
-      <td class="num">${u.mudancasStatus}</td>
-      <td class="num">${u.atualizacoes}</td>
-      <td class="num">${u.ocorrenciasTocadas}</td>
+      <td><strong>${escapeHtml(u.username)}</strong><br /><small class="muted">${escapeHtml(u.categorias.join(', ') || '—')}</small></td>
+      <td class="num">${u.resolvidas}<br /><small class="muted">${u.concluidasNaCategoria} na secretaria</small></td>
+      <td class="num">${u.abertasNaCategoria}<br /><small class="muted">de ${u.naCategoria}</small></td>
+      <td class="num">${u.acoes}<br /><small class="muted">${u.mudancasStatus} status · ${u.atualizacoes} atualiz.</small></td>
       <td class="num">${formatarHoras(u.horasMediasResolucao)}</td>
-      <td class="num">${u.abertasNaCategoria}</td>
       <td class="num">${u.notaMedia !== null && u.notaMedia !== undefined ? u.notaMedia.toLocaleString('pt-BR') + ' (' + u.avaliacoes + ')' : '—'}</td>
-      <td>${formatarDataHora(u.ultimaAtividade)}</td>
+      <td class="data">${formatarDataHora(u.ultimaAtividade)}</td>
     </tr>`).join('');
 }
 
@@ -2606,7 +2708,7 @@ function atualizarOpcoesDeExportacao(usuarios) {
 
 async function carregarProdutividade() {
   if (!panelProductivity || !currentAdminUser) return;
-  if (prodTitle) prodTitle.textContent = isSystemAdmin() ? 'Produtividade por administrador de categoria' : 'Minha secretaria';
+  if (prodTitle) prodTitle.textContent = isSystemAdmin() ? 'Produtividade por secretaria' : 'Minha secretaria';
   if (prodSubtitle) {
     prodSubtitle.textContent = isSystemAdmin()
       ? 'Ações registradas no histórico das ocorrências: mudanças de status e atualizações de atendimento.'
@@ -2622,7 +2724,7 @@ async function carregarProdutividade() {
       return;
     }
     ultimaProdutividade = dados;
-    renderProdTiles(dados.resumo);
+    renderProdTiles(dados.resumo, dados.usuarios);
     renderProdChart(dados.usuarios);
     renderProdTable(dados.usuarios);
     atualizarOpcoesDeExportacao(dados.usuarios);
@@ -2949,12 +3051,13 @@ if (clearIncidentsBtn) {
 // debug helper removed
 
 if (incidentList) {
-  incidentList.addEventListener('change', async (event) => {
+  (detailPanel || incidentList).addEventListener('change', async (event) => {
     const select = event.target.closest('.status-select');
     if (!select) return;
 
-    const item = getVisibleIncidents(getIncidents()).find((it) => it.id === select.dataset.id);
+    const item = getVisibleIncidents(getIncidents()).find((it) => it.id === (select.dataset.id || detailPanel?.dataset.id));
     if (!item || item.status === select.value) return;
+    showMessage(adminMessage, 'Salvando o status...', false);
 
     // Concluir exige a resposta ao cidadao: e ela que vai no e-mail/WhatsApp
     // de conclusao, em vez de uma atualizacao antiga de andamento.
@@ -2962,7 +3065,7 @@ if (incidentList) {
     if (select.value === 'Concluído') {
       respostaConclusao = await pedirRespostaDeConclusao(item);
       if (respostaConclusao === null) {
-        refreshDashboard();   // devolve o select ao status anterior
+        atualizarDetalheAberto();   // devolve o select ao status anterior
         return;
       }
     }
@@ -2987,17 +3090,20 @@ if (incidentList) {
     if (!resultado.ok) {
       showMessage(adminMessage, resultado.erro, true);
       refreshDashboard();
+      atualizarDetalheAberto();
       return;
     }
     const changedIncident = normalizeIncident(resultado.incidente);
     refreshDashboard();
+    atualizarDetalheAberto();
+    showMessage(adminMessage, `Status alterado para "${changedIncident?.status || select.value}". Notificando o cidadão...`, false);
 
     if (changedIncident) {
       const notified = await notifyIncidentStatusChange(changedIncident, previousStatus, changedIncident.status);
       if (!notified) {
-        showMessage(adminMessage, 'Status atualizado, mas a notificação ao cidadão falhou.', true);
+        showMessage(adminMessage, 'Status salvo, mas a notificação ao cidadão falhou (confira a aba Notificações).', true);
       } else {
-        showMessage(adminMessage, 'Status atualizado e cidadão notificado.', false);
+        showMessage(adminMessage, 'Status salvo e cidadão notificado por e-mail/WhatsApp.', false);
       }
     }
   });
@@ -3148,8 +3254,12 @@ const TITULOS_PAINEL = {
   password: ['Minha senha', 'Troque a senha de acesso ao painel.']
 };
 const switchTabOriginal = switchTab;
+let navegandoPeloHistorico = false;
 switchTab = function (tab) {
   switchTabOriginal(tab);
+  if (!navegandoPeloHistorico && location.hash !== '#' + tab) {
+    history.pushState({ tab }, '', '#' + tab);
+  }
   const ativo = document.querySelector('.sidebar-nav .tab-button.active');
   const chave = ativo ? ativo.id.replace('tab-', '') : tab;
   const [titulo, sub] = TITULOS_PAINEL[chave] || TITULOS_PAINEL.occurrences;
@@ -3158,6 +3268,15 @@ switchTab = function (tab) {
   if (h1) h1.textContent = titulo;
   if (p) p.textContent = sub;
 };
+
+window.addEventListener('popstate', () => {
+  if (!currentAdminUser || !adminDashboard || adminDashboard.classList.contains('hidden')) return;
+  if (detailPanel?.open) { closeIncidentDetail(); return; }
+  const alvo = (location.hash || '').replace('#', '');
+  if (!TITULOS_PAINEL[alvo]) return;
+  navegandoPeloHistorico = true;
+  try { switchTab(alvo); } finally { navegandoPeloHistorico = false; }
+});
 
 if (newAdminRoleSelect) {
   newAdminRoleSelect.addEventListener('change', updateAdminRoleUi);
@@ -4250,3 +4369,30 @@ async function carregarRecentes() {
   }
 }
 carregarRecentes();
+
+
+// =====================================================================
+// Avisos flutuantes do painel: o #admin-message fica no pe da pagina e
+// passava despercebido; toda mensagem dele tambem aparece no canto superior.
+// =====================================================================
+let avisoTimer = null;
+function mostrarAviso(texto, erro = false) {
+  let el = document.getElementById('aviso-flutuante');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'aviso-flutuante';
+    el.setAttribute('role', 'status');
+    document.body.appendChild(el);
+  }
+  el.className = 'aviso-flutuante' + (erro ? ' erro' : '');
+  el.textContent = texto;
+  el.hidden = false;
+  clearTimeout(avisoTimer);
+  avisoTimer = setTimeout(() => { el.hidden = true; }, erro ? 7000 : 4000);
+}
+
+const showMessageBase = showMessage;
+showMessage = function (element, message, isError = false) {
+  showMessageBase(element, message, isError);
+  if (element && element === adminMessage && message) mostrarAviso(message, isError);
+};

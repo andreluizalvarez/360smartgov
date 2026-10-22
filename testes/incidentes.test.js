@@ -177,6 +177,12 @@ async function esperarServidor() {
 
       const lista = await pedir('GET', '/api/incidentes', null, token);
       ok(lista.status === 200 && lista.corpo.incidentes.length === 2, 'admin do sistema ve as 2 ocorrencias');
+      const comFoto = lista.corpo.incidentes.find((i) => i.id === buraco.id);
+      ok(comFoto.photoDataUrl === undefined && comFoto.temFoto === true, 'a listagem vai sem a foto, so com a flag');
+      const foto = await pedir('GET', '/api/incidentes/' + buraco.id + '/foto', null, token);
+      ok(foto.status === 200 && foto.corpo.photoDataUrl.startsWith('data:image/jpeg'), 'a foto e buscada por ocorrencia');
+      const fotoSemToken = await pedir('GET', '/api/incidentes/' + buraco.id + '/foto');
+      ok(fotoSemToken.status === 401, 'foto exige sessao');
     }
 
     console.log('\nAdmin de categoria so enxerga e altera a sua categoria');

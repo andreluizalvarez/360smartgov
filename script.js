@@ -1027,15 +1027,20 @@ function temCoordenadas(incident) {
   return Boolean(incident) && valida(incident.latitude) && valida(incident.longitude);
 }
 
+// Enderecos que o geocodificador nao encontrou nao sao tentados de novo na
+// mesma sessao: antes, cada atualizacao da tela refazia todas as consultas.
+const geocodificacaoTentada = new Set();
+
 async function resolveIncidentCoordinates(incident) {
   if (temCoordenadas(incident)) {
     return incident;
   }
 
   const address = buildIncidentAddress(incident);
-  if (!address) {
+  if (!address || geocodificacaoTentada.has(incident.id)) {
     return incident;
   }
+  geocodificacaoTentada.add(incident.id);
 
   const coords = await geocodeAddress(address);
   if (coords) {
@@ -1452,9 +1457,14 @@ function aplicarFiltros(incidents) {
   });
 }
 
+let filtroTimer = null;
 [filterText, filterStatus, filterCategory, filterPriority, filterPeriod].forEach((el) => {
   if (!el) return;
-  el.addEventListener(el === filterText ? 'input' : 'change', () => { paginaAtual = 1; refreshDashboard(); });
+  el.addEventListener(el === filterText ? 'input' : 'change', () => {
+    paginaAtual = 1;
+    clearTimeout(filtroTimer);
+    filtroTimer = setTimeout(refreshDashboard, el === filterText ? 300 : 0);
+  });
 });
 if (filterClear) {
   filterClear.addEventListener('click', () => {
@@ -1543,6 +1553,16 @@ function showIncidentDetail(id) {
     if (incident.photoDataUrl) {
       detailImage.src = incident.photoDataUrl;
       detailImage.style.display = '';
+    } else if (incident.temFoto) {
+      // A listagem vem sem as fotos (pesadas); a foto e buscada ao abrir.
+      detailImage.src = '';
+      detailImage.style.display = 'none';
+      carregarFotoDoIncidente(incident).then((dataUrl) => {
+        if (dataUrl && detailPanel?.dataset.id === incident.id) {
+          detailImage.src = dataUrl;
+          detailImage.style.display = '';
+        }
+      });
     } else {
       detailImage.src = '';
       detailImage.style.display = 'none';
@@ -1569,6 +1589,7 @@ function showIncidentDetail(id) {
   if (somenteLeitura) somenteLeitura.hidden = podeAtuar;
   if (detailPanel) {
     detailPanel.dataset.id = incident.id;
+    detailPanel.classList.remove('hidden');
     if (typeof detailPanel.showModal === 'function') {
       if (!detailPanel.open) detailPanel.showModal();
     } else {
@@ -1578,10 +1599,24 @@ function showIncidentDetail(id) {
   }
 }
 
+async function carregarFotoDoIncidente(incident) {
+  try {
+    const resposta = await apiAutenticada(`/api/incidentes/${encodeURIComponent(incident.id)}/foto`);
+    if (!resposta.ok) return '';
+    const corpo = await resposta.json().catch(() => ({}));
+    if (corpo.photoDataUrl) incident.photoDataUrl = corpo.photoDataUrl;
+    return corpo.photoDataUrl || '';
+  } catch (error) {
+    return '';
+  }
+}
+
 function closeIncidentDetail() {
   if (!detailPanel) return;
+  // Nunca usar a classe "hidden" aqui: um <dialog> com display:none aberto
+  // por showModal() fica invisivel e deixa o resto da pagina inerte (travada).
+  detailPanel.classList.remove('hidden');
   if (typeof detailPanel.close === 'function' && detailPanel.open) detailPanel.close();
-  detailPanel.classList.add('hidden');
   detailPanel.setAttribute('aria-hidden', 'true');
 }
 

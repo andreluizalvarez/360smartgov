@@ -1075,8 +1075,17 @@ app.post('/api/incidentes', (req, res) => {
   return res.status(201).json(resultado);
 });
 
+// A listagem vai sem as fotos (base64 pesado): so a flag. A foto de uma
+// ocorrencia e buscada quando o painel abre o detalhe.
 app.get('/api/incidentes', auth.exigirAutenticacao, (req, res) => {
-  return res.json({ incidentes: incidentes.listar(req.usuario) });
+  const lista = incidentes.listar(req.usuario).map(({ photoDataUrl, ...resto }) => ({ ...resto, temFoto: Boolean(photoDataUrl) }));
+  return res.json({ incidentes: lista });
+});
+
+app.get('/api/incidentes/:id/foto', auth.exigirAutenticacao, (req, res) => {
+  const item = incidentes.listar(req.usuario).find((i) => i.id === req.params.id);
+  if (!item) return res.status(404).json({ error: 'Ocorrência não encontrada.' });
+  return res.json({ photoDataUrl: item.photoDataUrl || '' });
 });
 
 app.put('/api/incidentes/:id', auth.exigirAutenticacao, (req, res) => {

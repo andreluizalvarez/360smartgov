@@ -780,7 +780,7 @@ async function criarTemplateNoTwilio(chave, definicao) {
     throw new Error(aprovacao.message || ('Twilio respondeu ' + pedido.status + ' ao pedir a aprovação.'));
   }
 
-  return { sid: conteudo.sid, nome, status: aprovacao.status || 'pending', criadoEm: new Date().toISOString(), hash: hashDoTemplate(definicao) };
+  return { sid: conteudo.sid, nome, status: aprovacao.status || 'pending', criadoEm: new Date().toISOString(), hash: hashDoTemplate(definicao), variaveis: Object.keys(definicao.exemplos).length };
 }
 
 async function consultarAprovacaoTemplate(sid) {
@@ -820,11 +820,22 @@ async function statusDosTemplates(consultar = true) {
   return lista;
 }
 
+// Um template recriado (texto novo) fica pendente ate a Meta aprovar; ate la
+// o anterior aprovado continua em uso, para a notificacao nao parar.
+function comAnteriorAprovado(novo, antigo) {
+  const aprovado = antigo?.sid && antigo.status === 'approved' ? { sid: antigo.sid, nome: antigo.nome, variaveis: antigo.variaveis } : antigo?.anterior;
+  return aprovado ? { ...novo, anterior: aprovado } : novo;
+}
+
+// Devolve { sid, variaveis } do template a usar, ou null.
 function templateAprovado(chave) {
   const item = lerTemplates()[chave];
+  if (!item) return null;
   const definicao = definicoesDeTemplates()[chave];
-  if (definicao && templateDesatualizado(item, definicao)) return null;
-  return item?.sid && item.status === 'approved' ? item.sid : null;
+  const atualVale = item.sid && item.status === 'approved' && !(definicao && templateDesatualizado(item, definicao));
+  if (atualVale) return { sid: item.sid, variaveis: item.variaveis || null };
+  if (item.anterior?.sid) return { sid: item.anterior.sid, variaveis: item.anterior.variaveis || null };
+  return null;
 }
 
 async function sendWhatsAppNotification(toPhone, text, template = null) {
@@ -842,12 +853,14 @@ async function sendWhatsAppNotification(toPhone, text, template = null) {
   params.set('To', `whatsapp:${normalizedPhone}`);
 
   // Com template aprovado, a mensagem pode ser a primeira da conversa.
-  const contentSid = template?.chave ? templateAprovado(template.chave) : null;
+  const escolhido = template?.chave ? templateAprovado(template.chave) : null;
   let usouTemplate = false;
-  if (contentSid) {
-    params.set('ContentSid', contentSid);
+  if (escolhido) {
+    params.set('ContentSid', escolhido.sid);
+    // O template anterior pode ter menos variaveis que a definicao atual.
+    const entradas = Object.entries(template.variaveis || {}).filter(([k]) => !escolhido.variaveis || Number(k) <= escolhido.variaveis);
     params.set('ContentVariables', JSON.stringify(
-      Object.fromEntries(Object.entries(template.variaveis || {}).map(([k, v]) => [String(k), (v ?? '').toString().replace(/\s*\n+\s*/g, ' ').trim()]))
+      Object.fromEntries(entradas.map(([k, v]) => [String(k), (v ?? '').toString().replace(/\s*\n+\s*/g, ' ').trim()]))
     ));
     usouTemplate = true;
   } else {
@@ -1030,7 +1043,7 @@ app.post('/api/auth/whatsapp/templates/criar', auth.exigirAdminSistema, async (r
     // Ja aprovado ou aguardando: nao cria de novo.
     if (atual?.sid && !templateDesatualizado(atual, definicao) && ['approved', 'pending', 'received', 'submitted'].includes(atual.status)) continue;
     try {
-      salvos[chave] = await criarTemplateNoTwilio(chave, definicao);
+      salvos[chave] = comAnteriorAprovado(await criarTemplateNoTwilio(chave, definicao), salvos[chave]);
     } catch (error) {
       erros.push(definicao.titulo + ': ' + error.message);
     }
@@ -1656,18 +1669,53 @@ async function provisionarTemplatesNaSubida() {
   const salvos = lerTemplates();
   const definicoes = definicoesDeTemplates();
   const faltando = Object.keys(definicoes).filter((chave) => !salvos[chave]?.sid || templateDesatualizado(salvos[chave], definicoes[chave]));
-  if (!faltando.length) return;
 
-  console.log('[whatsapp] Criando templates e pedindo aprovação:', faltando.join(', '));
+  if (faltando.length) console.log('[whatsapp] Criando templates e pedindo aprovação:', faltando.join(', '));
   for (const chave of faltando) {
     try {
-      salvos[chave] = await criarTemplateNoTwilio(chave, definicoes[chave]);
+      salvos[chave] = comAnteriorAprovado(await criarTemplateNoTwilio(chave, definicoes[chave]), salvos[chave]);
       console.log('[whatsapp] Template', chave, 'criado:', salvos[chave].nome, '(' + salvos[chave].status + ')');
     } catch (error) {
       console.warn('[whatsapp] Falha ao criar o template', chave + ':', error.message);
     }
   }
+
+  // Template recriado e ainda pendente, sem referencia ao anterior aprovado
+  // (caso de uma versao antiga deste codigo): procura no Twilio um conteudo
+  // aprovado da mesma chave para usar enquanto a Meta nao aprova o novo.
+  for (const chave of Object.keys(definicoes)) {
+    const item = salvos[chave];
+    if (!item?.sid || item.status === 'approved' || item.anterior?.sid) continue;
+    try {
+      const anterior = await localizarAprovadoNoTwilio(chave, item.sid);
+      if (anterior) {
+        item.anterior = anterior;
+        console.log('[whatsapp] Template', chave, 'pendente: usando o anterior aprovado', anterior.nome);
+      }
+    } catch (error) {
+      console.warn('[whatsapp] Nao foi possivel procurar o template anterior de', chave + ':', error.message);
+    }
+  }
   salvarTemplates(salvos);
+}
+
+async function localizarAprovadoNoTwilio(chave, sidAtual) {
+  const resposta = await fetchFunc('https://content.twilio.com/v1/Content?PageSize=100', {
+    signal: AbortSignal.timeout(TEMPO_LIMITE_ENVIO_MS),
+    headers: cabecalhoTwilio()
+  });
+  const dados = await resposta.json().catch(() => ({}));
+  if (!resposta.ok) throw new Error(dados.message || ('HTTP ' + resposta.status));
+  const candidatos = (dados.contents || [])
+    .filter((c) => c.sid !== sidAtual && (c.friendly_name || '').startsWith('smartgov_' + chave + '_'))
+    .sort((a, b) => (b.date_created || '').localeCompare(a.date_created || ''));
+  for (const c of candidatos) {
+    const aprovacao = await consultarAprovacaoTemplate(c.sid);
+    if (aprovacao.status === 'approved') {
+      return { sid: c.sid, nome: c.friendly_name, variaveis: Object.keys(c.variables || {}).length || null };
+    }
+  }
+  return null;
 }
 
 app.listen(PORT, () => {

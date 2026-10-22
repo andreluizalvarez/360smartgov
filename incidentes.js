@@ -529,6 +529,16 @@ function criarIncidentes({ diretorioDados, papelAdminSistema }) {
       })
       .sort((a, b) => b.atrasadas - a.atrasadas || b.abertas - a.abertas);
 
+    // Categorias que nenhuma secretaria atende: as ocorrencias delas ficam
+    // sem dono ate o gabinete encaminhar.
+    const cobertas = new Set((usuarios || []).filter((u) => u.role !== papelAdminSistema).flatMap((u) => (u.allowedCategories || []).map(comparavel)));
+    const semSecretariaAbertas = abertas.filter((i) => !cobertas.has(comparavel(i.category)));
+    const semSecretaria = {
+      abertas: semSecretariaAbertas.length,
+      categorias: [...new Set(semSecretariaAbertas.map((i) => texto(i.category) || 'Não informada'))],
+      ocorrencias: semSecretariaAbertas.slice(0, 20).map((i) => ({ id: i.id, protocolo: i.protocolo, title: i.title, category: i.category }))
+    };
+
     const notas = todas.filter((i) => i.avaliacao).map((i) => Number(i.avaliacao.nota));
 
     // Serie diaria de recebidas e concluidas (ate 90 dias) para o grafico.
@@ -584,6 +594,7 @@ function criarIncidentes({ diretorioDados, papelAdminSistema }) {
       porBairro: porBairro.slice(0, 10),
       secretarias,
       hoje: dataCurta(new Date(agora).toISOString()),
+      semSecretaria,
       criterios: { atrasada: 'aberta há mais de ' + limiteAtrasoDias + ' dias', critica: 'atrasada e com prioridade Alta/Urgente, ou aberta há mais de ' + LIMITE_CRITICA_DIAS + ' dias' },
       atrasadas: atrasadas.slice(0, 40),
       criticas: criticas.slice(0, 40),

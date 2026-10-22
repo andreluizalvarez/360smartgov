@@ -220,7 +220,12 @@ async function fotoImpropria(dataUrl) {
   }
 }
 
-app.use(express.static(path.join(__dirname)));
+// html/js/css sempre revalidados: sem isto o celular guarda a versao antiga
+// do painel por dias e as correcoes nao chegam.
+function semCacheParaEstaticos(res, caminho) {
+  if (/.(html|js|css)$/i.test(caminho)) res.setHeader('Cache-Control', 'no-cache');
+}
+app.use(express.static(path.join(__dirname), { setHeaders: semCacheParaEstaticos }));
 // A ocorrencia chega com a foto em base64 no corpo: o limite padrao de 100 kb nao basta.
 app.use(express.json({ limit: '4mb' }));
 
@@ -386,7 +391,7 @@ function buildNotificationText(eventType, incident, actor, previousStatus, newSt
 
     const chaveTemplate = chave === 'em andamento' ? 'andamento' : (chave === 'concluído' ? 'concluido' : null);
     const variaveis = chaveTemplate === 'concluido'
-      ? { 1: citizenName, 2: title, 3: local, 4: respostaDaPrefeitura }
+      ? { 1: citizenName, 2: title, 3: local, 4: respostaDaPrefeitura, 5: linkAvaliacao || (SITE_URL + '/avaliar.html') }
       : { 1: citizenName, 2: title, 3: local };
 
     return {
@@ -408,7 +413,7 @@ function buildNotificationText(eventType, incident, actor, previousStatus, newSt
         '',
         ...ASSINATURA_EMAIL
       ].join('\n'),
-      whatsappText: `Olá, ${citizenName}! ${modelo.abertura} "${title}" – Local: ${local}. Status: ${toStatus}. ${modelo.fechamento.filter(Boolean).join(' ')} ${PREFEITURA_NOME} – SmartGov 360.`
+      whatsappText: `Olá, ${citizenName}! ${modelo.abertura} "${title}" – Local: ${local}. Status: ${toStatus}. ${modelo.fechamento.filter(Boolean).join(' ')}${chave === 'concluído' && linkAvaliacao ? ' Avalie o atendimento: ' + linkAvaliacao : ''} ${PREFEITURA_NOME} – SmartGov 360.`
     };
   }
 
@@ -708,8 +713,8 @@ function definicoesDeTemplates() {
     },
     concluido: {
       titulo: 'Solicitação concluída',
-      corpo: 'Olá, {{1}}! Sua solicitação recebeu uma resposta da Prefeitura.\n\nSolicitação: {{2}}\nLocal: {{3}}\nStatus: Concluído\n\nResposta da Prefeitura: {{4}}\n\nAgradecemos sua participação. Sua colaboração ajuda a Prefeitura a identificar problemas e melhorar os serviços da cidade.\n\n' + assinatura,
-      exemplos: { 1: 'Gian', 2: 'Buracos na rua com acúmulo de água', 3: 'Rua Pará, Centro, Ourinhos – SP', 4: 'O serviço de reparo do pavimento foi realizado no local informado.' }
+      corpo: 'Olá, {{1}}! Sua solicitação recebeu uma resposta da Prefeitura.\n\nSolicitação: {{2}}\nLocal: {{3}}\nStatus: Concluído\n\nResposta da Prefeitura: {{4}}\n\nAvalie o atendimento (leva menos de um minuto): {{5}}\n\nAgradecemos sua participação. Sua colaboração ajuda a Prefeitura a identificar problemas e melhorar os serviços da cidade.\n\n' + assinatura,
+      exemplos: { 1: 'Gian', 2: 'Buracos na rua com acúmulo de água', 3: 'Rua Pará, Centro, Ourinhos – SP', 4: 'O serviço de reparo do pavimento foi realizado no local informado.', 5: SITE_URL + '/avaliar.html?t=exemplo' }
     }
   };
 }
@@ -736,6 +741,16 @@ function cabecalhoTwilio(json = false) {
 }
 
 // Cria o conteudo no Twilio e pede a aprovacao da Meta para o WhatsApp.
+function hashDoTemplate(definicao) {
+  return require('crypto').createHash('sha256').update(definicao.corpo).digest('hex').slice(0, 16);
+}
+
+// Um template cujo texto mudou precisa de nova aprovacao: e tratado como
+// inexistente (o SID antigo fica no Twilio, sem uso).
+function templateDesatualizado(item, definicao) {
+  return Boolean(item?.sid) && item.hash !== hashDoTemplate(definicao);
+}
+
 async function criarTemplateNoTwilio(chave, definicao) {
   const nome = `smartgov_${chave}_${new Date().toISOString().replace(/\D/g, '').slice(0, 12)}`;
   const criado = await fetchFunc('https://content.twilio.com/v1/Content', {
@@ -765,7 +780,7 @@ async function criarTemplateNoTwilio(chave, definicao) {
     throw new Error(aprovacao.message || ('Twilio respondeu ' + pedido.status + ' ao pedir a aprovação.'));
   }
 
-  return { sid: conteudo.sid, nome, status: aprovacao.status || 'pending', criadoEm: new Date().toISOString() };
+  return { sid: conteudo.sid, nome, status: aprovacao.status || 'pending', criadoEm: new Date().toISOString(), hash: hashDoTemplate(definicao) };
 }
 
 async function consultarAprovacaoTemplate(sid) {
@@ -807,6 +822,8 @@ async function statusDosTemplates(consultar = true) {
 
 function templateAprovado(chave) {
   const item = lerTemplates()[chave];
+  const definicao = definicoesDeTemplates()[chave];
+  if (definicao && templateDesatualizado(item, definicao)) return null;
   return item?.sid && item.status === 'approved' ? item.sid : null;
 }
 
@@ -1011,7 +1028,7 @@ app.post('/api/auth/whatsapp/templates/criar', auth.exigirAdminSistema, async (r
   for (const [chave, definicao] of Object.entries(definicoes)) {
     const atual = salvos[chave];
     // Ja aprovado ou aguardando: nao cria de novo.
-    if (atual?.sid && ['approved', 'pending', 'received', 'submitted'].includes(atual.status)) continue;
+    if (atual?.sid && !templateDesatualizado(atual, definicao) && ['approved', 'pending', 'received', 'submitted'].includes(atual.status)) continue;
     try {
       salvos[chave] = await criarTemplateNoTwilio(chave, definicao);
     } catch (error) {
@@ -1380,7 +1397,8 @@ app.get('/api/incidentes/produtividade/pdf', auth.exigirAutenticacao, (req, res)
   const carimbo = new Date().toISOString().slice(0, 10);
   const sufixo = dados.individual ? '-' + dados.individual.replace(/[^a-z0-9_.-]+/gi, '_') : '';
   res.setHeader('Content-Type', 'application/pdf');
-  res.setHeader('Content-Disposition', `attachment; filename="produtividade${sufixo}-${dias > 0 ? dias + 'dias' : 'historico'}-${carimbo}.pdf"`);
+  const disposicao = req.query.inline === '1' ? 'inline' : 'attachment';
+  res.setHeader('Content-Disposition', `${disposicao}; filename="produtividade${sufixo}-${dias > 0 ? dias + 'dias' : 'historico'}-${carimbo}.pdf"`);
   try {
     gerarPdfProdutividade(dados, res);
   } catch (error) {
@@ -1637,7 +1655,7 @@ async function provisionarTemplatesNaSubida() {
 
   const salvos = lerTemplates();
   const definicoes = definicoesDeTemplates();
-  const faltando = Object.keys(definicoes).filter((chave) => !salvos[chave]?.sid);
+  const faltando = Object.keys(definicoes).filter((chave) => !salvos[chave]?.sid || templateDesatualizado(salvos[chave], definicoes[chave]));
   if (!faltando.length) return;
 
   console.log('[whatsapp] Criando templates e pedindo aprovação:', faltando.join(', '));

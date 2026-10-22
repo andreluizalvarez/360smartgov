@@ -742,3 +742,51 @@
   max-width: 100%;
   height: auto;
 }
+
+/* Dialogo rola por dentro no celular; botao de fechar tambem no pe. */
+.detalhe-modal {
+  overflow-y: auto;
+}
+
+.detalhe-rodape {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 1rem;
+}
+
+.tabela-ocorrencias.sem-secretaria .col-secretaria {
+  display: none;
+}
+
+.sem-dono {
+  color: #b23b3b;
+  font-weight: 600;
+}
+
+.exec-alerta {
+  margin: 0 0 0.6rem;
+  padding: 0.6rem 0.8rem;
+  border-radius: 10px;
+  background: #fbeeee;
+  color: #8b2a2a;
+  font-size: 0.9rem;
+}
+
+.exec-alerta a {
+  color: #8b2a2a;
+  font-weight: 600;
+}
+
+.prod-actions .btn-azul {
+  padding: 0.7rem 1.1rem;
+}
+
+@media (max-width: 760px) {
+  .detalhe-modal {
+    width: calc(100vw - 1rem);
+    max-height: calc(100vh - 1rem);
+  }
+  .detalhe-conteudo {
+    padding: 1rem;
+  }
+}

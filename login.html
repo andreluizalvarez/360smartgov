@@ -97,6 +97,7 @@
               </select>
               <select id="filter-category" aria-label="Categoria"><option value="">Todas as categorias</option></select>
               <select id="filter-priority" aria-label="Prioridade"><option value="">Todas as prioridades</option></select>
+              <select id="filter-secretaria" aria-label="Secretaria" hidden><option value="">Todas as secretarias</option></select>
               <select id="filter-period" aria-label="Período">
                 <option value="0">Todo o período</option>
                 <option value="7">Últimos 7 dias</option>
@@ -114,6 +115,7 @@
                     <th>Protocolo</th>
                     <th>Ocorrência</th>
                     <th>Categoria</th>
+                    <th class="col-secretaria">Secretaria</th>
                     <th>Prioridade</th>
                     <th>Status</th>
                     <th>Aberta em</th>
@@ -146,6 +148,7 @@
                   </div>
                   <div class="preview-details">
                     <p><strong>Categoria:</strong> <span id="detail-category"></span> · <strong>Prioridade:</strong> <span id="detail-priority"></span></p>
+                    <p><strong>Secretaria responsável:</strong> <span id="detail-secretaria"></span></p>
                     <p><strong>Endereço:</strong> <span id="detail-address"></span></p>
                     <p><strong>Descrição:</strong></p>
                     <p id="detail-description"></p>
@@ -168,6 +171,13 @@
                     <button type="button" id="detail-save-work" class="btn-azul save-work-update-btn">Salvar atualização</button>
                   </section>
                   <p id="detail-readonly" class="detalhe-somente-leitura" hidden>Somente leitura: as atualizações de status e de atendimento são feitas pela secretaria responsável.</p>
+                  <section id="detail-forward" class="detalhe-acoes" hidden>
+                    <h4>Encaminhar</h4>
+                    <p class="passo-ajuda">Troque a categoria para que a ocorrência chegue à secretaria responsável.</p>
+                    <label for="detail-forward-category">Categoria</label>
+                    <select id="detail-forward-category"></select>
+                    <button type="button" id="detail-forward-save" class="btn-azul">Encaminhar</button>
+                  </section>
                   <div class="preview-details">
                     <p><strong>Última atualização da equipe:</strong></p>
                     <p id="detail-work-update"></p>
@@ -180,6 +190,9 @@
                     <ul id="detail-work-history" class="work-history-list"></ul>
                   </div>
                 </div>
+              </div>
+              <div class="detalhe-rodape">
+                <button type="button" class="btn-azul-contorno" data-fechar-detalhe>Fechar</button>
               </div>
             </div>
           </dialog>
@@ -313,6 +326,7 @@
             <div class="exec-grid">
               <section class="exec-card">
                 <h4>Atrasos por secretaria <small class="exec-nota">atrasada = aberta há mais de 7 dias</small></h4>
+                <p id="exec-orphans" class="exec-alerta" hidden></p>
                 <ul id="exec-secretariats" class="rank-list"></ul>
               </section>
               <section class="exec-card">
@@ -367,7 +381,8 @@
                   <option value="">Relatório geral (todos)</option>
                 </select>
               </label>
-              <button id="prod-export-pdf" type="button" class="btn btn-secondary prod-export">Exportar PDF</button>
+              <button id="prod-print-pdf" type="button" class="btn-azul prod-export">Abrir / imprimir</button>
+              <button id="prod-export-pdf" type="button" class="btn btn-secondary prod-export">Baixar PDF</button>
               </div>
             </div>
 

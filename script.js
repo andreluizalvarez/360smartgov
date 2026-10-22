@@ -1345,6 +1345,19 @@ async function saveIncidentWorkUpdate(id, workUpdate) {
   showMessage(adminMessage, 'Atualização da ocorrência salva com sucesso.', false);
 }
 
+// Secretarias (administradores por categoria) que atendem uma categoria.
+function secretariasDaCategoria(categoria) {
+  const alvo = normalizePermissionValue(categoria || '');
+  return getAdminUsers()
+    .filter((u) => u.role !== SYSTEM_ADMIN_ROLE && (u.allowedCategories || []).some((c) => normalizePermissionValue(c) === alvo))
+    .map((u) => u.username);
+}
+
+function rotuloSecretaria(categoria) {
+  const nomes = secretariasDaCategoria(categoria);
+  return nomes.length ? escapeHtml(nomes.join(', ')) : '<span class="sem-dono">Sem secretaria</span>';
+}
+
 const ITENS_POR_PAGINA = 10;
 let paginaAtual = 1;
 const incidentPager = document.getElementById('incident-pager');
@@ -1401,12 +1414,14 @@ function renderIncidents(incidents) {
   const pagina = incidents.slice((paginaAtual - 1) * ITENS_POR_PAGINA, paginaAtual * ITENS_POR_PAGINA);
   renderPager(incidents.length);
 
+  document.querySelector('.tabela-ocorrencias')?.classList.toggle('sem-secretaria', !isSystemAdmin());
   incidentList.innerHTML = pagina
     .map((item) => `
       <tr data-id="${item.id}" tabindex="0" title="Abrir detalhes">
         <td class="num">${Number.isInteger(item.protocolo) ? '#' + item.protocolo : '—'}</td>
         <td class="col-titulo"><strong>${escapeHtml(item.title || 'Ocorrência')}</strong><small>${escapeHtml(item.neighborhood || item.city || item.address || '')}</small></td>
         <td>${escapeHtml(item.category || '')}</td>
+        <td class="col-secretaria">${rotuloSecretaria(item.category)}</td>
         <td>${escapeHtml(item.priority || '')}</td>
         <td><span class="status-badge" data-status="${escapeHtml(item.status)}">${escapeHtml(item.status)}</span></td>
         <td class="data">${dataCurta(item.createdAt)}</td>
@@ -1423,6 +1438,7 @@ const filterStatus = document.getElementById('filter-status');
 const filterCategory = document.getElementById('filter-category');
 const filterPriority = document.getElementById('filter-priority');
 const filterPeriod = document.getElementById('filter-period');
+const filterSecretaria = document.getElementById('filter-secretaria');
 const filterClear = document.getElementById('filter-clear');
 const filterCount = document.getElementById('filter-count');
 
@@ -1435,6 +1451,15 @@ function atualizarOpcoesDeFiltro(incidents) {
   };
   preencher(filterCategory, [...new Set(incidents.map((i) => i.category).filter(Boolean))].sort(), 'Todas as categorias');
   preencher(filterPriority, [...new Set(incidents.map((i) => i.priority).filter(Boolean))].sort(), 'Todas as prioridades');
+  if (filterSecretaria) {
+    filterSecretaria.hidden = !isSystemAdmin();
+    if (isSystemAdmin()) {
+      const atual = filterSecretaria.value;
+      const nomes = getAdminUsers().filter((u) => u.role !== SYSTEM_ADMIN_ROLE).map((u) => u.username).sort();
+      filterSecretaria.innerHTML = '<option value="">Todas as secretarias</option><option value="__sem__">Sem secretaria</option>' + nomes.map((n) => `<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join('');
+      if ([...filterSecretaria.options].some((o) => o.value === atual)) filterSecretaria.value = atual;
+    }
+  }
 }
 
 function aplicarFiltros(incidents) {
@@ -1444,8 +1469,13 @@ function aplicarFiltros(incidents) {
   const prioridade = filterPriority?.value || '';
   const dias = Number(filterPeriod?.value || 0);
   const limite = dias > 0 ? Date.now() - dias * 86400000 : 0;
+  const secretaria = isSystemAdmin() ? (filterSecretaria?.value || '') : '';
   return incidents.filter((i) => {
     if (status && i.status !== status) return false;
+    if (secretaria) {
+      const donos = secretariasDaCategoria(i.category);
+      if (secretaria === '__sem__' ? donos.length > 0 : !donos.includes(secretaria)) return false;
+    }
     if (categoria && i.category !== categoria) return false;
     if (prioridade && i.priority !== prioridade) return false;
     if (limite && Date.parse(i.createdAt || '') < limite) return false;
@@ -1458,7 +1488,7 @@ function aplicarFiltros(incidents) {
 }
 
 let filtroTimer = null;
-[filterText, filterStatus, filterCategory, filterPriority, filterPeriod].forEach((el) => {
+[filterText, filterStatus, filterCategory, filterPriority, filterPeriod, filterSecretaria].forEach((el) => {
   if (!el) return;
   el.addEventListener(el === filterText ? 'input' : 'change', () => {
     paginaAtual = 1;
@@ -1468,7 +1498,7 @@ let filtroTimer = null;
 });
 if (filterClear) {
   filterClear.addEventListener('click', () => {
-    [filterText, filterStatus, filterCategory, filterPriority, filterPeriod].forEach((el) => { if (el) el.value = el === filterPeriod ? '0' : ''; });
+    [filterText, filterStatus, filterCategory, filterPriority, filterPeriod, filterSecretaria].forEach((el) => { if (el) el.value = el === filterPeriod ? '0' : ''; });
     paginaAtual = 1;
     refreshDashboard();
   });
@@ -1521,6 +1551,19 @@ function showIncidentDetail(id) {
   if (!incident) return;
   if (detailTitle) detailTitle.textContent = (Number.isInteger(incident.protocolo) ? '#' + incident.protocolo + ' · ' : '') + (incident.title || 'Ocorrência');
   if (detailCategory) detailCategory.textContent = incident.category || '';
+  const detailSecretaria = document.getElementById('detail-secretaria');
+  if (detailSecretaria) detailSecretaria.innerHTML = rotuloSecretaria(incident.category);
+  const forward = document.getElementById('detail-forward');
+  if (forward) {
+    forward.hidden = !isSystemAdmin();
+    const sel = document.getElementById('detail-forward-category');
+    if (sel && isSystemAdmin()) {
+      sel.innerHTML = getCategoryConfig().map((c) => {
+        const donos = secretariasDaCategoria(c);
+        return `<option value="${escapeHtml(c)}" ${c === incident.category ? 'selected' : ''}>${escapeHtml(c)}${donos.length ? ' — ' + escapeHtml(donos.join(', ')) : ' — sem secretaria'}</option>`;
+      }).join('');
+    }
+  }
   if (detailPriority) detailPriority.textContent = incident.priority || '';
   if (detailName) detailName.textContent = incident.name || '';
   if (detailEmail) detailEmail.textContent = incident.email ? '· ' + incident.email : '';
@@ -1646,7 +1689,27 @@ if (incidentList) {
 }
 
 if (detailPanel) {
-  detailPanel.addEventListener('click', (event) => {
+  detailPanel.addEventListener('click', async (event) => {
+    if (event.target.closest('[data-fechar-detalhe]')) { closeIncidentDetail(); return; }
+    const forwardBtn = event.target.closest('#detail-forward-save');
+    if (forwardBtn) {
+      const id = detailPanel.dataset.id;
+      const categoria = document.getElementById('detail-forward-category')?.value || '';
+      const item = getIncidents().find((i) => i.id === id);
+      if (!item || !categoria || categoria === item.category) return;
+      forwardBtn.disabled = true;
+      const r = await atualizarIncidenteNoServidor(id, {
+        category: categoria,
+        history: [...(Array.isArray(item.history) ? item.history : []), { id: crypto.randomUUID(), type: 'work', text: `Encaminhada de "${item.category}" para "${categoria}"`, by: currentAdminUser?.username || '', at: new Date().toISOString() }]
+      });
+      forwardBtn.disabled = false;
+      if (!r.ok) { showMessage(adminMessage, r.erro, true); return; }
+      refreshDashboard();
+      atualizarDetalheAberto();
+      const donos = secretariasDaCategoria(categoria);
+      showMessage(adminMessage, donos.length ? `Encaminhada para ${donos.join(', ')}.` : 'Categoria alterada, mas nenhuma secretaria atende essa categoria ainda.', !donos.length);
+      return;
+    }
     const saveBtn = event.target.closest('.save-work-update-btn');
     if (!saveBtn) return;
     const id = saveBtn.dataset.id || detailPanel.dataset.id;
@@ -2503,6 +2566,14 @@ function renderExecutivo(d) {
   renderDonutStatus(t);
   renderDesempenho(d.secretarias);
   renderMetas(t);
+  const orfas = document.getElementById('exec-orphans');
+  if (orfas) {
+    const s = d.semSecretaria;
+    orfas.hidden = !s || !s.abertas;
+    if (s && s.abertas) {
+      orfas.innerHTML = `<strong>${s.abertas} aberta${s.abertas === 1 ? '' : 's'} sem secretaria</strong> — categoria${s.categorias.length === 1 ? '' : 's'} ${escapeHtml(s.categorias.join(', '))} sem responsável. ${s.ocorrencias.map((o) => linkOcorrencia(o.id, '#' + o.protocolo)).join(', ')}. Abra a ocorrência e use "Encaminhar", ou atribua a categoria a uma secretaria em Usuários.`;
+    }
+  }
   if (execTiles) {
     const tiles = [
       [t.noPeriodo, 'ocorrências no período'],
@@ -2770,6 +2841,32 @@ async function carregarProdutividade() {
 }
 
 if (prodPeriod) prodPeriod.addEventListener('change', carregarProdutividade);
+
+// Abre o PDF em nova aba (com o botao de imprimir do navegador). A aba e
+// aberta no clique, antes do fetch, para o celular nao bloquear como popup.
+const prodPrintBtn = document.getElementById('prod-print-pdf');
+if (prodPrintBtn) {
+  prodPrintBtn.addEventListener('click', async () => {
+    if (!currentAdminUser) return;
+    const dias = prodPeriod ? prodPeriod.value : '30';
+    const usuario = isSystemAdmin() && prodExportUser ? prodExportUser.value : '';
+    const aba = window.open('', '_blank');
+    if (aba) aba.document.write('<p style="font-family:sans-serif;padding:2rem">Gerando o relatório...</p>');
+    prodPrintBtn.disabled = true;
+    try {
+      const resposta = await apiAutenticada(`/api/incidentes/produtividade/pdf?inline=1&dias=${encodeURIComponent(dias)}${usuario ? '&usuario=' + encodeURIComponent(usuario) : ''}`);
+      if (!resposta.ok) throw new Error('Não foi possível gerar o PDF.');
+      const url = URL.createObjectURL(await resposta.blob());
+      if (aba) aba.location = url; else window.open(url, '_blank');
+      showMessage(prodMessage, 'Relatório aberto em outra aba. Use o botão de imprimir do navegador; esta aba continua no painel.', false);
+    } catch (error) {
+      if (aba) aba.close();
+      showMessage(prodMessage, error.message || 'Não foi possível falar com o servidor.', true);
+    } finally {
+      prodPrintBtn.disabled = false;
+    }
+  });
+}
 
 // Baixa o relatorio em PDF gerado no servidor para o periodo selecionado.
 const prodExportBtn = document.getElementById('prod-export-pdf');

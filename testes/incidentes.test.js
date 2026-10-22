@@ -284,6 +284,8 @@ async function esperarServidor() {
       ok(propria.status === 200 && propria.corpo.usuarios.length === 1 && propria.corpo.usuarios[0].username === 'operador', 'admin de categoria ve so a propria secretaria');
       const umSo = await pedir('GET', '/api/incidentes/produtividade?dias=30&usuario=' + linha.id, null, token);
       ok(umSo.corpo.usuarios.length === 1 && umSo.corpo.resumo.usuarios === 1, 'admin do sistema filtra a produtividade por usuario');
+      const pdfInline = await pedirBruto('GET', '/api/incidentes/produtividade/pdf?inline=1&dias=30', token);
+      ok(pdfInline.status === 200 && /^inline/.test(pdfInline.disposicao), 'PDF inline para abrir no navegador');
       const pdfIndividual = await pedirBruto('GET', '/api/incidentes/produtividade/pdf?dias=30&usuario=' + linha.id, token);
       ok(pdfIndividual.status === 200 && /produtividade-operador-30dias/.test(pdfIndividual.disposicao), 'PDF individual por secretaria');
       const pdfOperador = await pedirBruto('GET', '/api/incidentes/produtividade/pdf?dias=30', tokenOperador);
@@ -303,6 +305,7 @@ async function esperarServidor() {
         ok(Array.isArray(exec.corpo.serie) && exec.corpo.serie.length === 30 && exec.corpo.serie[29].recebidas === 2, 'serie diaria com as recebidas de hoje');
         ok(Array.isArray(exec.corpo.criticas) && exec.corpo.criterios.critica.includes('15 dias') && typeof exec.corpo.hoje === 'string', 'criticas, criterios e data de hoje para a IA');
         ok(exec.corpo.recentes[0].protocolo === 1002 && exec.corpo.recentes[0].criadaEm === exec.corpo.hoje, 'recentes trazem protocolo e data de criacao');
+        ok(exec.corpo.semSecretaria.abertas === 1 && exec.corpo.semSecretaria.categorias[0] === 'Iluminação pública', 'aponta as abertas sem secretaria responsavel');
         const prodOp = (await pedir('GET', '/api/incidentes/produtividade?dias=30', null, tokenOperador)).corpo.usuarios[0];
         ok(prodOp.concluidasNaCategoria === 1 && prodOp.naCategoria === 1, 'produtividade traz as concluidas da propria secretaria');
         ok(exec.corpo.totais.concluidas === 1 && typeof exec.corpo.secretarias[0].taxaConclusao === 'number', 'concluidas totais e taxa por secretaria');

@@ -405,7 +405,7 @@ function renderAdminUsers() {
       return `
         <li class="admin-list-item" data-user-id="${user.id}">
           <div>
-            <strong>${user.username}</strong><br />
+            <strong>${escapeHtml(cap(user.username))}</strong><br />
             <small>${profileLabel}</small><br />
             <small>${categoriesLabel}</small>
           </div>
@@ -664,8 +664,8 @@ async function showAdminDashboard(user) {
   const sbUser = document.getElementById('sidebar-user');
   const sbRole = document.getElementById('sidebar-role');
   const sbAvatar = document.getElementById('sidebar-avatar');
-  if (sbUser) sbUser.textContent = user?.username || '—';
-  if (sbRole) sbRole.textContent = isSystemAdmin(user) ? 'Gabinete · administrador do sistema' : 'Secretaria · ' + ((user?.allowedCategories || []).join(', ') || 'sem categorias');
+  if (sbUser) sbUser.textContent = cap(user?.username || '—');
+  if (sbRole) sbRole.textContent = isSystemAdmin(user) ? 'Gabinete · administrador do sistema' : 'Secretaria · ' + ((user?.allowedCategories || []).map(cap).join(', ') || 'sem categorias');
   if (sbAvatar) sbAvatar.textContent = (user?.username || '?').slice(0, 2).toUpperCase();
   // O prefeito abre na Visao do Prefeito; a secretaria, nas suas ocorrencias.
   switchTab(isSystemAdmin(user) ? 'executive' : 'occurrences');
@@ -1106,8 +1106,20 @@ async function initMap(incidents) {
   const readyIncidents = await ensureIncidentCoordinates(incidents);
   const validPoints = readyIncidents.filter((incident) => temCoordenadas(incident));
 
+  const mapNoteVazio = document.getElementById('map-note');
   if (!validPoints.length) {
-    mapElement.innerHTML = '<p style="padding:1rem; color: var(--muted);">Nenhuma ocorrência com endereço válido para exibir no mapa.</p>';
+    // Com o mapa ja criado, so limpa os marcadores: trocar o innerHTML
+    // destruiria o mapa e o deixaria em branco nas listas seguintes.
+    if (adminMap) {
+      adminMarkers.forEach((marker) => marker.setMap(null));
+      adminMarkers = [];
+    } else {
+      mapElement.innerHTML = '<p style="padding:1rem; color: var(--muted);">Nenhuma ocorrência com endereço válido para exibir no mapa.</p>';
+    }
+    if (mapNoteVazio) {
+      mapNoteVazio.hidden = false;
+      mapNoteVazio.textContent = readyIncidents.length ? `${readyIncidents.length} ocorrência(s) sem localização: o endereço não foi encontrado pelo geocodificador.` : 'Nenhuma ocorrência para mostrar no mapa.';
+    }
     return;
   }
 
@@ -1345,6 +1357,13 @@ async function saveIncidentWorkUpdate(id, workUpdate) {
   showMessage(adminMessage, 'Atualização da ocorrência salva com sucesso.', false);
 }
 
+// Primeira letra maiuscula para exibicao (categorias e usuarios sao gravados
+// como o administrador digitou, muitas vezes em minusculas).
+function cap(valor) {
+  const t = (valor === undefined || valor === null ? '' : valor).toString();
+  return t ? t.charAt(0).toUpperCase() + t.slice(1) : t;
+}
+
 // Secretarias (administradores por categoria) que atendem uma categoria.
 function secretariasDaCategoria(categoria) {
   const alvo = normalizePermissionValue(categoria || '');
@@ -1354,8 +1373,14 @@ function secretariasDaCategoria(categoria) {
 }
 
 function rotuloSecretaria(categoria) {
+  // A secretaria nao recebe a lista de usuarios: reconhece as proprias categorias.
+  if (currentAdminUser && !isSystemAdmin()) {
+    const alvo = normalizePermissionValue(categoria || '');
+    const minha = (currentAdminUser.allowedCategories || []).some((c) => normalizePermissionValue(c) === alvo);
+    return minha ? escapeHtml(cap(currentAdminUser.username)) : '—';
+  }
   const nomes = secretariasDaCategoria(categoria);
-  return nomes.length ? escapeHtml(nomes.join(', ')) : '<span class="sem-dono">Sem secretaria</span>';
+  return nomes.length ? escapeHtml(nomes.map(cap).join(', ')) : '<span class="sem-dono">Sem secretaria</span>';
 }
 
 const ITENS_POR_PAGINA = 10;
@@ -1419,10 +1444,10 @@ function renderIncidents(incidents) {
     .map((item) => `
       <tr data-id="${item.id}" tabindex="0" title="Abrir detalhes">
         <td class="num">${Number.isInteger(item.protocolo) ? '#' + item.protocolo : '—'}</td>
-        <td class="col-titulo"><strong>${escapeHtml(item.title || 'Ocorrência')}</strong><small>${escapeHtml(item.neighborhood || item.city || item.address || '')}</small></td>
-        <td>${escapeHtml(item.category || '')}</td>
+        <td class="col-titulo"><strong>${escapeHtml(cap(item.title || 'Ocorrência'))}</strong><small>${escapeHtml(cap(item.neighborhood || item.city || item.address || ''))}</small></td>
+        <td>${escapeHtml(cap(item.category || ''))}</td>
         <td class="col-secretaria">${rotuloSecretaria(item.category)}</td>
-        <td>${escapeHtml(item.priority || '')}</td>
+        <td>${escapeHtml(cap(item.priority || ''))}</td>
         <td><span class="status-badge" data-status="${escapeHtml(item.status)}">${escapeHtml(item.status)}</span></td>
         <td class="data">${dataCurta(item.createdAt)}</td>
         <td class="data">${dataCurta(item.updatedAt || item.workUpdatedAt || '') || '—'}</td>
@@ -1446,7 +1471,7 @@ function atualizarOpcoesDeFiltro(incidents) {
   const preencher = (select, valores, rotuloTodos) => {
     if (!select) return;
     const atual = select.value;
-    select.innerHTML = `<option value="">${rotuloTodos}</option>` + valores.map((v) => `<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`).join('');
+    select.innerHTML = `<option value="">${rotuloTodos}</option>` + valores.map((v) => `<option value="${escapeHtml(v)}">${escapeHtml(cap(v))}</option>`).join('');
     if (valores.includes(atual)) select.value = atual;
   };
   preencher(filterCategory, [...new Set(incidents.map((i) => i.category).filter(Boolean))].sort(), 'Todas as categorias');
@@ -1456,7 +1481,7 @@ function atualizarOpcoesDeFiltro(incidents) {
     if (isSystemAdmin()) {
       const atual = filterSecretaria.value;
       const nomes = getAdminUsers().filter((u) => u.role !== SYSTEM_ADMIN_ROLE).map((u) => u.username).sort();
-      filterSecretaria.innerHTML = '<option value="">Todas as secretarias</option><option value="__sem__">Sem secretaria</option>' + nomes.map((n) => `<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join('');
+      filterSecretaria.innerHTML = '<option value="">Todas as secretarias</option><option value="__sem__">Sem secretaria</option>' + nomes.map((n) => `<option value="${escapeHtml(n)}">${escapeHtml(cap(n))}</option>`).join('');
       if ([...filterSecretaria.options].some((o) => o.value === atual)) filterSecretaria.value = atual;
     }
   }
@@ -1467,11 +1492,14 @@ function aplicarFiltros(incidents) {
   const status = filterStatus?.value || '';
   const categoria = filterCategory?.value || '';
   const prioridade = filterPriority?.value || '';
-  const dias = Number(filterPeriod?.value || 0);
+  const periodo = filterPeriod?.value || '0';
+  const dias = Number(periodo) || 0;
   const limite = dias > 0 ? Date.now() - dias * 86400000 : 0;
+  const hoje = new Date().toLocaleDateString('pt-BR');
   const secretaria = isSystemAdmin() ? (filterSecretaria?.value || '') : '';
   return incidents.filter((i) => {
     if (status && i.status !== status) return false;
+    if (periodo === 'hoje' && new Date(i.createdAt || 0).toLocaleDateString('pt-BR') !== hoje) return false;
     if (secretaria) {
       const donos = secretariasDaCategoria(i.category);
       if (secretaria === '__sem__' ? donos.length > 0 : !donos.includes(secretaria)) return false;
@@ -1550,7 +1578,7 @@ function showIncidentDetail(id) {
   const incident = incidents.find((it) => it.id === id);
   if (!incident) return;
   if (detailTitle) detailTitle.textContent = (Number.isInteger(incident.protocolo) ? '#' + incident.protocolo + ' · ' : '') + (incident.title || 'Ocorrência');
-  if (detailCategory) detailCategory.textContent = incident.category || '';
+  if (detailCategory) detailCategory.textContent = cap(incident.category || '');
   const detailSecretaria = document.getElementById('detail-secretaria');
   if (detailSecretaria) detailSecretaria.innerHTML = rotuloSecretaria(incident.category);
   const forward = document.getElementById('detail-forward');
@@ -1560,11 +1588,11 @@ function showIncidentDetail(id) {
     if (sel && isSystemAdmin()) {
       sel.innerHTML = getCategoryConfig().map((c) => {
         const donos = secretariasDaCategoria(c);
-        return `<option value="${escapeHtml(c)}" ${c === incident.category ? 'selected' : ''}>${escapeHtml(c)}${donos.length ? ' — ' + escapeHtml(donos.join(', ')) : ' — sem secretaria'}</option>`;
+        return `<option value="${escapeHtml(c)}" ${c === incident.category ? 'selected' : ''}>${escapeHtml(cap(c))}${donos.length ? ' — ' + escapeHtml(donos.map(cap).join(', ')) : ' — sem secretaria'}</option>`;
       }).join('');
     }
   }
-  if (detailPriority) detailPriority.textContent = incident.priority || '';
+  if (detailPriority) detailPriority.textContent = cap(incident.priority || '');
   if (detailName) detailName.textContent = incident.name || '';
   if (detailEmail) detailEmail.textContent = incident.email ? '· ' + incident.email : '';
   if (detailAddress) detailAddress.textContent = incident.address || `${incident.street || ''} ${incident.number || ''}`;
@@ -1626,6 +1654,14 @@ function showIncidentDetail(id) {
     const txt = acoes.querySelector('.work-update-input');
     const btn = acoes.querySelector('.save-work-update-btn');
     if (sel) { sel.value = incident.status || 'Recebido'; sel.dataset.id = incident.id; }
+    const selPrio = acoes.querySelector('#detail-priority-select');
+    if (selPrio) {
+      const lista = getPriorityConfig();
+      const atual = incident.priority || '';
+      const opcoes = lista.includes(atual) || !atual ? lista : [atual, ...lista];
+      selPrio.innerHTML = opcoes.map((p) => `<option value="${escapeHtml(p)}" ${p === atual ? 'selected' : ''}>${escapeHtml(cap(p))}</option>`).join('');
+      selPrio.dataset.id = incident.id;
+    }
     if (txt) { txt.value = incident.workUpdate || ''; txt.dataset.id = incident.id; }
     if (btn) btn.dataset.id = incident.id;
   }
@@ -2535,7 +2571,7 @@ function renderDesempenho(secretarias) {
   el.innerHTML = lista.map((s) => {
     const taxa = s.taxaConclusao || 0;
     const cor = taxa >= 80 ? 'var(--verde-ok)' : taxa >= 60 ? 'var(--amarelo)' : '#e3342f';
-    return `<li><span class="rank-nome"><strong>${escapeHtml(s.username)}</strong><small>${escapeHtml(s.categorias.join(', ') || '—')}</small></span><span class="rank-barra"><i style="width:${taxa}%;background:${cor}"></i></span><span class="rank-num">${taxa}%<small> · ${s.total - s.abertas}/${s.total}</small></span></li>`;
+    return `<li><span class="rank-nome"><strong>${escapeHtml(cap(s.username))}</strong><small>${escapeHtml(s.categorias.map(cap).join(', ') || '—')}</small></span><span class="rank-barra"><i style="width:${taxa}%;background:${cor}"></i></span><span class="rank-num">${taxa}%<small> · ${s.total - s.abertas}/${s.total}</small></span></li>`;
   }).join('');
 }
 
@@ -2577,7 +2613,7 @@ function renderExecutivo(d) {
   if (execTiles) {
     const tiles = [
       [t.noPeriodo, 'ocorrências no período'],
-      [t.abertas, 'abertas hoje'],
+      [t.abertas, 'em aberto agora (todas as datas)'],
       [t.taxaConclusao !== null ? t.taxaConclusao + '%' : '—', 'concluídas no período'],
       [formatarHoras(t.horasMediasConclusao), 'tempo médio de conclusão'],
       [`${t.atrasadas} · ${t.criticas ?? 0}`, `atrasadas (> ${d.limiteAtrasoDias} dias) · críticas`],
@@ -2591,12 +2627,12 @@ function renderExecutivo(d) {
   };
   const max = (arr, k) => Math.max(1, ...arr.map((i) => i[k] || 0));
   const mc = max(d.porCategoria, 'total');
-  lista(execCategories, d.porCategoria.slice(0, 5), (c) => `<li><span class="rank-nome">${escapeHtml(c.nome)}</span><span class="rank-barra"><i style="width:${Math.round((c.total / mc) * 100)}%"></i></span><span class="rank-num">${c.total}<small> · ${c.abertas} abertas</small></span></li>`);
+  lista(execCategories, d.porCategoria.slice(0, 5), (c) => `<li><span class="rank-nome">${escapeHtml(cap(c.nome))}</span><span class="rank-barra"><i style="width:${Math.round((c.total / mc) * 100)}%"></i></span><span class="rank-num">${c.total}<small> · ${c.abertas} abertas</small></span></li>`);
   const mb = max(d.porBairro, 'total');
-  lista(execNeighborhoods, d.porBairro.slice(0, 5), (b) => `<li><span class="rank-nome">${escapeHtml(b.nome)}</span><span class="rank-barra"><i style="width:${Math.round((b.total / mb) * 100)}%"></i></span><span class="rank-num">${b.total}</span></li>`);
-  lista(execSecretariats, d.secretarias, (s) => `<li class="${s.atrasadas ? 'alerta' : ''}"><span class="rank-nome"><strong>${escapeHtml(s.username)}</strong><small>${s.abertas} abertas · ${s.concluidasNoPeriodo} concluídas no período${s.maisAntigaDias ? ' · mais antiga há ' + s.maisAntigaDias + ' dias' : ''}</small></span><span class="rank-num">${s.atrasadas} atrasada${s.atrasadas === 1 ? '' : 's'}</span></li>`);
+  lista(execNeighborhoods, d.porBairro.slice(0, 5), (b) => `<li><span class="rank-nome">${escapeHtml(cap(b.nome))}</span><span class="rank-barra"><i style="width:${Math.round((b.total / mb) * 100)}%"></i></span><span class="rank-num">${b.total}</span></li>`);
+  lista(execSecretariats, d.secretarias, (s) => `<li class="${s.atrasadas ? 'alerta' : ''}"><span class="rank-nome"><strong>${escapeHtml(cap(s.username))}</strong><small>${s.abertas} abertas · ${s.concluidasNoPeriodo} concluídas no período${s.maisAntigaDias ? ' · mais antiga há ' + s.maisAntigaDias + ' dias' : ''}</small></span><span class="rank-num">${s.atrasadas} atrasada${s.atrasadas === 1 ? '' : 's'}</span></li>`);
   const criticas = (d.criticas || []).slice(0, 12);
-  lista(execDelayed, criticas, (i) => `<li><span class="rank-nome">${linkOcorrencia(i.id, (i.protocolo ? '#' + i.protocolo + ' · ' : '') + (i.title || 'Ocorrência'))}<small>${escapeHtml(i.category)}${i.bairro ? ' · ' + escapeHtml(i.bairro) : ''} · ${escapeHtml(i.status)}</small><span class="exec-motivo">${escapeHtml(i.motivo || '')}</span></span><span class="rank-num badge-dias">${i.diasAberta} dias</span></li>`);
+  lista(execDelayed, criticas, (i) => `<li><span class="rank-nome">${linkOcorrencia(i.id, (i.protocolo ? '#' + i.protocolo + ' · ' : '') + cap(i.title || 'Ocorrência'))}<small>${escapeHtml(cap(i.category))}${i.bairro ? ' · ' + escapeHtml(cap(i.bairro)) : ''} · ${escapeHtml(i.status)}</small><span class="exec-motivo">${escapeHtml(i.motivo || '')}</span></span><span class="rank-num badge-dias">${i.diasAberta} dias</span></li>`);
   if (!criticas.length && execDelayed) execDelayed.innerHTML = '<li class="vazio">Nenhuma ocorrência crítica: nenhuma atrasada com prioridade Alta/Urgente nem aberta há mais de 15 dias.</li>';
 }
 
@@ -2751,7 +2787,7 @@ function renderProdChart(usuarios) {
   const barras = dados.map((u, i) => {
     const y = 6 + i * alturaLinha;
     const w = Math.max(0, u.resolvidas * escala);
-    const nome = escapeHtml(u.username);
+    const nome = escapeHtml(cap(u.username));
     const titulo = `${u.username}: ${u.resolvidas} resolvida(s), ${u.acoes} ação(ões)`;
     // ponta arredondada (4px) so no lado do dado; base reta no eixo
     const r = w > 4 ? 4 : 0;
@@ -2778,7 +2814,7 @@ function renderProdTable(usuarios) {
   }
   prodTableBody.innerHTML = usuarios.map((u) => `
     <tr>
-      <td><strong>${escapeHtml(u.username)}</strong><br /><small class="muted">${escapeHtml(u.categorias.join(', ') || '—')}</small></td>
+      <td><strong>${escapeHtml(cap(u.username))}</strong><small class="muted">${escapeHtml(u.categorias.map(cap).join(', ') || '—')}</small></td>
       <td class="num">${u.resolvidas}<br /><small class="muted">${u.concluidasNaCategoria} na secretaria</small></td>
       <td class="num">${u.abertasNaCategoria}<br /><small class="muted">de ${u.naCategoria}</small></td>
       <td class="num">${u.acoes}<br /><small class="muted">${u.mudancasStatus} status · ${u.atualizacoes} atualiz.</small></td>
@@ -2806,7 +2842,7 @@ function atualizarOpcoesDeExportacao(usuarios) {
   if (!prodExportUser) return;
   const atual = prodExportUser.value;
   prodExportUser.innerHTML = '<option value="">Relatório geral (todos)</option>'
-    + usuarios.map((u) => `<option value="${escapeHtml(u.id)}">Individual: ${escapeHtml(u.username)}</option>`).join('');
+    + usuarios.map((u) => `<option value="${escapeHtml(u.id)}">Individual: ${escapeHtml(cap(u.username))}</option>`).join('');
   if ([...prodExportUser.options].some((o) => o.value === atual)) prodExportUser.value = atual;
   const wrapper = prodExportUser.closest('label') || prodExportUser;
   wrapper.hidden = !isSystemAdmin();
@@ -3184,6 +3220,20 @@ if (clearIncidentsBtn) {
 
 if (incidentList) {
   (detailPanel || incidentList).addEventListener('change', async (event) => {
+    const selPrio = event.target.closest('#detail-priority-select');
+    if (selPrio) {
+      const item = getVisibleIncidents(getIncidents()).find((it) => it.id === selPrio.dataset.id);
+      if (!item || item.priority === selPrio.value) return;
+      const r = await atualizarIncidenteNoServidor(item.id, {
+        priority: selPrio.value,
+        history: [...(Array.isArray(item.history) ? item.history : []), { id: crypto.randomUUID(), type: 'work', text: `Prioridade alterada de ${item.priority || '—'} para ${selPrio.value}`, by: currentAdminUser?.username || '', at: new Date().toISOString() }]
+      });
+      if (!r.ok) { showMessage(adminMessage, r.erro, true); atualizarDetalheAberto(); return; }
+      refreshDashboard();
+      atualizarDetalheAberto();
+      showMessage(adminMessage, `Prioridade alterada para "${cap(selPrio.value)}".`, false);
+      return;
+    }
     const select = event.target.closest('.status-select');
     if (!select) return;
 

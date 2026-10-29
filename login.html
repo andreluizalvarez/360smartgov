@@ -100,6 +100,7 @@
               <select id="filter-secretaria" aria-label="Secretaria" hidden><option value="">Todas as secretarias</option></select>
               <select id="filter-period" aria-label="Período">
                 <option value="0">Todo o período</option>
+                <option value="hoje">Abertas hoje</option>
                 <option value="7">Últimos 7 dias</option>
                 <option value="30">Últimos 30 dias</option>
                 <option value="90">Últimos 90 dias</option>
@@ -147,7 +148,7 @@
                     <img id="detail-image" class="preview-image" alt="Foto da ocorrência" src="" />
                   </div>
                   <div class="preview-details">
-                    <p><strong>Categoria:</strong> <span id="detail-category"></span> · <strong>Prioridade:</strong> <span id="detail-priority"></span></p>
+                    <p><strong>Categoria:</strong> <span id="detail-category"></span> · <strong>Prioridade:</strong> <span id="detail-priority"></span> <small class="muted" title="A prioridade é sugerida automaticamente pela IA a partir da foto e da descrição (risco a pessoas, trânsito e extensão do problema). A secretaria pode ajustar em Atendimento.">(sugerida pela IA)</small></p>
                     <p><strong>Secretaria responsável:</strong> <span id="detail-secretaria"></span></p>
                     <p><strong>Endereço:</strong> <span id="detail-address"></span></p>
                     <p><strong>Descrição:</strong></p>
@@ -166,6 +167,9 @@
                       <option value="Concluído">Concluído</option>
                     </select>
                     <p class="passo-ajuda">Ao mudar o status o cidadão é notificado por e-mail e WhatsApp. Concluir pede a resposta ao cidadão.</p>
+                    <label for="detail-priority-select">Prioridade</label>
+                    <select id="detail-priority-select"></select>
+                    <p class="passo-ajuda">Sugerida pela IA a partir da foto e da descrição. Ajuste se a avaliação em campo for diferente.</p>
                     <label for="detail-work-input">Atualização da equipe</label>
                     <textarea id="detail-work-input" class="work-update-input" rows="3" placeholder="Descreva o que está sendo feito..."></textarea>
                     <button type="button" id="detail-save-work" class="btn-azul save-work-update-btn">Salvar atualização</button>

@@ -37,6 +37,15 @@ const CAMPOS_EDITAVEIS = [
 // Versao do termo de consentimento (LGPD) aceito no formulario.
 const VERSAO_CONSENTIMENTO = '2026-10';
 
+// Dia civil no fuso da prefeitura (AAAA-MM-DD): "hoje" e "criada hoje" nao
+// podem virar amanha/ontem por causa do UTC do servidor.
+const FUSO = 'America/Sao_Paulo';
+function diaLocal(iso) {
+  const t = Date.parse(iso || '');
+  if (!Number.isFinite(t)) return null;
+  return new Date(t).toLocaleDateString('en-CA', { timeZone: FUSO });
+}
+
 function diasDesde(iso, agora = Date.now()) {
   const t = Date.parse(iso || '');
   return Number.isFinite(t) ? Math.max(0, (agora - t) / 86400000) : null;
@@ -475,7 +484,7 @@ function criarIncidentes({ diretorioDados, papelAdminSistema }) {
       .filter((h) => Number.isFinite(h) && h >= 0);
     const horasMedias = horas.length ? Math.round((horas.reduce((a, b) => a + b, 0) / horas.length) * 10) / 10 : null;
 
-    const dataCurta = (iso) => (iso ? iso.slice(0, 10) : '');
+    const dataCurta = (iso) => diaLocal(iso) || '';
     const resumir = (i) => ({
       id: i.id,
       protocolo: i.protocolo,
@@ -544,12 +553,7 @@ function criarIncidentes({ diretorioDados, papelAdminSistema }) {
     // Serie diaria de recebidas e concluidas (ate 90 dias) para o grafico.
     const diasSerie = Math.min(dias > 0 ? dias : 90, 90);
     const serie = [];
-    const chaveDia = (iso) => {
-      const t = Date.parse(iso || '');
-      if (!Number.isFinite(t)) return null;
-      const d = new Date(t);
-      return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
-    };
+    const chaveDia = diaLocal;
     const recebidasPorDia = new Map();
     const concluidasPorDia = new Map();
     for (const item of todas) {

@@ -413,7 +413,7 @@ function buildNotificationText(eventType, incident, actor, previousStatus, newSt
         '',
         ...ASSINATURA_EMAIL
       ].join('\n'),
-      whatsappText: `Olá, ${citizenName}! ${modelo.abertura} "${title}" – Local: ${local}. Status: ${toStatus}. ${modelo.fechamento.filter(Boolean).join(' ')}${chave === 'concluído' && linkAvaliacao ? ' Avalie o atendimento: ' + linkAvaliacao : ''} ${PREFEITURA_NOME} – SmartGov 360.`
+      whatsappText: `Olá, ${citizenName}! ${modelo.abertura} "${title}" – Local: ${local}. Status: ${toStatus}. ${modelo.fechamento.filter(Boolean).join(' ')} ${PREFEITURA_NOME} – SmartGov 360.`
     };
   }
 
@@ -1250,6 +1250,11 @@ app.post('/api/avaliacao/:token', (req, res) => {
 });
 
 // ------------------------------------------------ relatorio de produtividade em PDF
+function capitalizar(valor) {
+  const t = (valor === undefined || valor === null ? '' : valor).toString();
+  return t ? t.charAt(0).toUpperCase() + t.slice(1) : t;
+}
+
 function horasLegiveis(horas) {
   if (horas === null || horas === undefined) return '—';
   if (horas < 1) return Math.round(horas * 60) + ' min';
@@ -1317,7 +1322,7 @@ function gerarPdfProdutividade(dados, res) {
     comAtividade.forEach((u) => {
       if (y > doc.page.height - 120) { doc.addPage(); y = doc.page.margins.top; }
       const w = (u.resolvidas / maximo) * larguraBarraMax;
-      doc.fillColor(TEXTO).font('Helvetica').fontSize(9.5).text(u.username, esquerda, y + 4, { width: margemNome - 10, align: 'right', ellipsis: true });
+      doc.fillColor(TEXTO).font('Helvetica').fontSize(9.5).text(capitalizar(u.username), esquerda, y + 4, { width: margemNome - 10, align: 'right', ellipsis: true });
       doc.save();
       doc.roundedRect(esquerda + margemNome, y, Math.max(w, 2), 16, 3).fill(VERDE);
       doc.restore();
@@ -1364,13 +1369,13 @@ function gerarPdfProdutividade(dados, res) {
     doc.fillColor(MUTED).text('Nenhum administrador de categoria cadastrado.', esquerda, y);
   }
   dados.usuarios.forEach((u) => {
-    const categorias = (u.categorias || []).join(', ') || '—';
+    const categorias = (u.categorias || []).map(capitalizar).join(', ') || '—';
     const alturaLinha = Math.max(16, doc.heightOfString(categorias, { width: 82 }) + 6);
     if (y + alturaLinha > doc.page.height - doc.page.margins.bottom - 20) {
       doc.addPage(); y = doc.page.margins.top; cabecalhoTabela(); doc.font('Helvetica').fontSize(8.5);
     }
     const valores = [
-      u.username, categorias, String(u.resolvidas), String(u.mudancasStatus), String(u.atualizacoes),
+      capitalizar(u.username), categorias, String(u.resolvidas), String(u.mudancasStatus), String(u.atualizacoes),
       String(u.ocorrenciasTocadas), horasLegiveis(u.horasMediasResolucao), String(u.abertasNaCategoria),
       u.notaMedia !== null && u.notaMedia !== undefined ? u.notaMedia.toLocaleString('pt-BR') : '—',
       u.ultimaAtividade ? new Date(u.ultimaAtividade).toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' }) : '—'

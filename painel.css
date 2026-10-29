@@ -790,3 +790,16 @@
     padding: 1rem;
   }
 }
+
+/* Produtividade: a coluna da secretaria quebra linha em vez de alargar a tabela. */
+.pagina-painel .prod-table td:first-child,
+.pagina-painel .prod-table th:first-child {
+  white-space: normal;
+  min-width: 200px;
+  max-width: 320px;
+}
+
+.pagina-painel .prod-table td:first-child small {
+  display: block;
+  line-height: 1.35;
+}

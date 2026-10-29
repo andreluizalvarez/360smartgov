@@ -305,6 +305,7 @@ async function esperarServidor() {
         ok(Array.isArray(exec.corpo.serie) && exec.corpo.serie.length === 30 && exec.corpo.serie[29].recebidas === 2, 'serie diaria com as recebidas de hoje');
         ok(Array.isArray(exec.corpo.criticas) && exec.corpo.criterios.critica.includes('15 dias') && typeof exec.corpo.hoje === 'string', 'criticas, criterios e data de hoje para a IA');
         ok(exec.corpo.recentes[0].protocolo === 1002 && exec.corpo.recentes[0].criadaEm === exec.corpo.hoje, 'recentes trazem protocolo e data de criacao');
+        ok(exec.corpo.hoje === new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' }), 'a data de hoje usa o fuso do Brasil');
         ok(exec.corpo.semSecretaria.abertas === 1 && exec.corpo.semSecretaria.categorias[0] === 'Iluminação pública', 'aponta as abertas sem secretaria responsavel');
         const prodOp = (await pedir('GET', '/api/incidentes/produtividade?dias=30', null, tokenOperador)).corpo.usuarios[0];
         ok(prodOp.concluidasNaCategoria === 1 && prodOp.naCategoria === 1, 'produtividade traz as concluidas da propria secretaria');

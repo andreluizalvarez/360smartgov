@@ -78,6 +78,26 @@ async function esperarServidor() {
 }
 
 (async () => {
+  console.log('Correcao das notas invertidas (uma unica vez)');
+  {
+    const { criarIncidentes } = require('../incidentes');
+    const pasta = fs.mkdtempSync(path.join(os.tmpdir(), 'notas-'));
+    const base = { category: 'Buraco na via', status: 'Concluído', createdAt: '2026-10-01T12:00:00.000Z' };
+    fs.writeFileSync(path.join(pasta, 'incidentes.json'), JSON.stringify([
+      { id: 'a', ...base, avaliacao: { nota: 2, comentario: 'ok', em: '2026-10-02T12:00:00.000Z' } },
+      { id: 'b', ...base, avaliacao: { nota: 5, em: '2026-10-02T12:00:00.000Z' } },
+      { id: 'c', ...base }
+    ]));
+    const admin = { role: 'system_admin' };
+    const primeira = criarIncidentes({ diretorioDados: pasta, papelAdminSistema: 'system_admin' }).listar(admin);
+    ok(primeira.find((i) => i.id === 'a').avaliacao.nota === 4 && primeira.find((i) => i.id === 'a').avaliacao.notaOriginal === 2, '4 estrelas gravadas como 2 viram 4');
+    ok(primeira.find((i) => i.id === 'b').avaliacao.nota === 1, '5 gravado como 5 era 1 estrela');
+    ok(!primeira.find((i) => i.id === 'c').avaliacao, 'sem avaliacao nada muda');
+    const segunda = criarIncidentes({ diretorioDados: pasta, papelAdminSistema: 'system_admin' }).listar(admin);
+    ok(segunda.find((i) => i.id === 'a').avaliacao.nota === 4 && fs.existsSync(path.join(pasta, 'avaliacoes-corrigidas.json')), 'a correcao nao roda duas vezes');
+    fs.rmSync(pasta, { recursive: true, force: true });
+  }
+
   // Preserva os dados reais: o teste roda com um diretorio limpo.
   const backup = fs.existsSync(DIR_DADOS)
     ? fs.mkdtempSync(path.join(os.tmpdir(), 'dados-'))
@@ -89,7 +109,8 @@ async function esperarServidor() {
 
   const servidor = spawn(process.execPath, ['server.js'], {
     cwd: RAIZ,
-    env: { ...process.env, PORT: String(PORTA), ADMIN_INITIAL_PASSWORD: 'admin123', OPENAI_API_KEY: '', EMAIL_PROVIDER: 'nenhum' },
+    // Sem Twilio: o .env local tem credenciais reais e o teste nao pode enviar WhatsApp.
+    env: { ...process.env, PORT: String(PORTA), ADMIN_INITIAL_PASSWORD: 'admin123', OPENAI_API_KEY: '', EMAIL_PROVIDER: 'nenhum', TWILIO_ACCOUNT_SID: '', TWILIO_AUTH_TOKEN: '', TWILIO_WHATSAPP_FROM: '' },
     stdio: ['ignore', 'pipe', 'pipe']
   });
   servidor.stderr.on('data', (d) => console.log('[servidor]', d.toString().trim().slice(0, 200)));
@@ -360,6 +381,53 @@ async function esperarServidor() {
       ok(limpar.status === 200 && limpar.corpo.removidas === 1, 'limpar tudo remove o restante');
       const vazia = await pedir('GET', '/api/incidentes', null, token);
       ok(vazia.corpo.incidentes.length === 0, 'lista vazia depois da limpeza');
+    }
+
+    console.log('\nNotificacao de cada mudanca ao cidadao');
+    {
+      const semIncidente = await pedir('POST', '/api/notify-user', { eventType: 'work_update' });
+      ok(semIncidente.status === 400, 'sem ocorrencia ou contato responde 400');
+      for (const eventType of ['work_update', 'priority_changed', 'forwarded', 'status_changed']) {
+        const r = await pedir('POST', '/api/notify-user', { eventType, detalhe: 'Equipe no local', newStatus: 'Concluído', incident: { title: 'Poste', email: 'cidadao@exemplo.com', phone: '14999999999', respostaConclusao: 'Feito.' } });
+        ok(r.status === 207 && r.corpo.ok === false && typeof r.corpo.email.reason === 'string' && typeof r.corpo.whatsapp.reason === 'string', eventType + ': sem provedores, devolve o motivo de cada canal');
+      }
+    }
+
+    console.log('\nPublicacoes da prefeitura');
+    {
+      const publica0 = await pedir('GET', '/api/publicacoes');
+      ok(publica0.status === 200 && publica0.corpo.publicacoes.length === 0, 'pagina inicial sem publicacoes');
+      const semToken = await pedir('POST', '/api/publicacoes', { titulo: 'x' });
+      ok(semToken.status === 401, 'criar sem token responde 401');
+      const operadorCria = await pedir('POST', '/api/publicacoes', { titulo: 'x' }, tokenOperador);
+      ok(operadorCria.status === 403, 'admin de categoria nao publica');
+      const semTitulo = await pedir('POST', '/api/publicacoes', { texto: 'sem titulo' }, token);
+      ok(semTitulo.status === 400, 'titulo e obrigatorio');
+      const linkRuim = await pedir('POST', '/api/publicacoes', { titulo: 'Campanha', link: 'ourinhos.sp.gov.br' }, token);
+      ok(linkRuim.status === 400, 'link sem http(s) e recusado');
+      const imagemRuim = await pedir('POST', '/api/publicacoes', { titulo: 'Campanha', imagem: 'data:text/html;base64,PGI+' }, token);
+      ok(imagemRuim.status === 400, 'imagem que nao e imagem e recusada');
+      const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+      const criada = await pedir('POST', '/api/publicacoes', { titulo: 'Mutirão de limpeza', texto: 'Sábado, no Centro.', link: 'https://www.ourinhos.sp.gov.br', imagem: png }, token);
+      ok(criada.status === 201 && criada.corpo.publicacao.id && criada.corpo.publicacao.ativo === true && criada.corpo.publicacao.criadoPor === 'admin', 'admin do sistema cria uma publicacao ativa');
+      const oculta = await pedir('POST', '/api/publicacoes', { titulo: 'Rascunho', ativo: false }, token);
+      ok(oculta.status === 201 && oculta.corpo.publicacao.ativo === false, 'publicacao pode nascer oculta');
+      const publica1 = await pedir('GET', '/api/publicacoes');
+      ok(publica1.corpo.publicacoes.length === 1 && publica1.corpo.publicacoes[0].titulo === 'Mutirão de limpeza' && publica1.corpo.publicacoes[0].imagem === png && publica1.corpo.publicacoes[0].criadoPor === undefined, 'pagina inicial mostra so as ativas, sem autor');
+      const todas = await pedir('GET', '/api/publicacoes/todas', null, token);
+      ok(todas.status === 200 && todas.corpo.publicacoes.length === 2, 'painel lista todas');
+      const todasOperador = await pedir('GET', '/api/publicacoes/todas', null, tokenOperador);
+      ok(todasOperador.status === 403, 'admin de categoria nao ve a lista do painel');
+      const ocultar = await pedir('PUT', '/api/publicacoes/' + criada.corpo.publicacao.id, { ativo: false }, token);
+      ok(ocultar.status === 200 && ocultar.corpo.publicacao.ativo === false && ocultar.corpo.publicacao.titulo === 'Mutirão de limpeza' && ocultar.corpo.publicacao.imagem === png, 'ocultar mantem os demais campos');
+      const editar = await pedir('PUT', '/api/publicacoes/' + criada.corpo.publicacao.id, { titulo: 'Mutirão de limpeza 2', imagem: '', ativo: true }, token);
+      ok(editar.status === 200 && editar.corpo.publicacao.titulo === 'Mutirão de limpeza 2' && editar.corpo.publicacao.imagem === '', 'edicao troca titulo e remove a imagem');
+      const inexistente = await pedir('PUT', '/api/publicacoes/nao-existe', { titulo: 'x' }, token);
+      ok(inexistente.status === 404, 'id inexistente responde 404');
+      const remover = await pedir('DELETE', '/api/publicacoes/' + oculta.corpo.publicacao.id, null, token);
+      ok(remover.status === 200, 'remocao');
+      const publica2 = await pedir('GET', '/api/publicacoes');
+      ok(publica2.corpo.publicacoes.length === 1 && publica2.corpo.publicacoes[0].titulo === 'Mutirão de limpeza 2', 'pagina inicial reflete as mudancas');
     }
   } finally {
     restaurar();

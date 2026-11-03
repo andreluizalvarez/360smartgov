@@ -39,11 +39,13 @@
           <fieldset class="field full estrelas-field">
             <legend>Dê uma nota de 1 a 5 para o atendimento</legend>
             <div class="estrelas" role="radiogroup" aria-label="Nota">
-              <input type="radio" name="nota" id="nota-1" value="1" required /><label for="nota-1" title="Muito ruim">★</label>
-              <input type="radio" name="nota" id="nota-2" value="2" /><label for="nota-2" title="Ruim">★</label>
-              <input type="radio" name="nota" id="nota-3" value="3" /><label for="nota-3" title="Regular">★</label>
-              <input type="radio" name="nota" id="nota-4" value="4" /><label for="nota-4" title="Bom">★</label>
+              <!-- Ordem decrescente de proposito: o CSS usa row-reverse para que a
+                   estrela 1 fique a esquerda e as estrelas ate a escolhida acendam. -->
               <input type="radio" name="nota" id="nota-5" value="5" /><label for="nota-5" title="Excelente">★</label>
+              <input type="radio" name="nota" id="nota-4" value="4" /><label for="nota-4" title="Bom">★</label>
+              <input type="radio" name="nota" id="nota-3" value="3" /><label for="nota-3" title="Regular">★</label>
+              <input type="radio" name="nota" id="nota-2" value="2" /><label for="nota-2" title="Ruim">★</label>
+              <input type="radio" name="nota" id="nota-1" value="1" required /><label for="nota-1" title="Muito ruim">★</label>
             </div>
             <span id="nota-legenda" class="nota-legenda">Toque nas estrelas</span>
           </fieldset>

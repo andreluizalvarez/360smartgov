@@ -340,7 +340,15 @@ function primeiroNome(nome) {
   return limpo ? limpo.split(/\s+/)[0] : 'Cidadão';
 }
 
-function buildNotificationText(eventType, incident, actor, previousStatus, newStatus) {
+// Mudancas que tambem avisam o cidadao: cada uma vai com um texto curto
+// (`detalhe`) e usa o template "atualizacao" no WhatsApp.
+const EVENTOS_DE_ATUALIZACAO = {
+  work_update: { abertura: 'A equipe responsável registrou uma atualização sobre sua solicitação.', rotulo: 'Atualização da equipe' },
+  priority_changed: { abertura: 'A prioridade da sua solicitação foi atualizada pela Prefeitura.', rotulo: 'Prioridade' },
+  forwarded: { abertura: 'Sua solicitação foi encaminhada ao setor responsável.', rotulo: 'Setor responsável' }
+};
+
+function buildNotificationText(eventType, incident, actor, previousStatus, newStatus, detalhe = '') {
   const title = incident?.title || 'Ocorrência';
   const category = incident?.category || 'Não informada';
   const status = incident?.status || newStatus || 'Não informado';
@@ -349,14 +357,44 @@ function buildNotificationText(eventType, incident, actor, previousStatus, newSt
   const protocolo = Number.isInteger(incident?.protocolo) ? `#${incident.protocolo}` : '';
   const linhaProtocolo = protocolo ? [`Protocolo: ${protocolo}`, ''] : [];
 
+  if (EVENTOS_DE_ATUALIZACAO[eventType]) {
+    const evento = EVENTOS_DE_ATUALIZACAO[eventType];
+    const local = localDaOcorrencia(incident);
+    const textoDetalhe = (detalhe || '').toString().trim() || 'Sua solicitação foi atualizada.';
+    const atualizacao = `${evento.rotulo}: ${textoDetalhe}`;
+    return {
+      template: { chave: 'atualizacao', variaveis: { 1: citizenName, 2: title, 3: atualizacao } },
+      subject: 'Sua solicitação foi atualizada – SmartGov 360',
+      emailText: [
+        `Olá, ${citizenName}!`,
+        '',
+        evento.abertura,
+        '',
+        ...linhaProtocolo,
+        `Solicitação: ${title}`,
+        '',
+        `Local: ${local}`,
+        '',
+        `Status: ${status}`,
+        '',
+        atualizacao,
+        '',
+        'Você será informado sempre que houver uma nova atualização.',
+        '',
+        ...ASSINATURA_EMAIL
+      ].join('\n'),
+      whatsappText: `Olá, ${citizenName}! ${evento.abertura} "${title}"${protocolo ? ' (protocolo ' + protocolo + ')' : ''} – Local: ${local}. Status: ${status}. ${atualizacao}. Você será informado sempre que houver uma nova atualização. ${PREFEITURA_NOME} – SmartGov 360.`
+    };
+  }
+
   if (eventType === 'status_changed') {
     const toStatus = newStatus || status;
     const local = localDaOcorrencia(incident);
     const chave = (toStatus || '').toString().trim().toLowerCase();
-    // A "resposta" e a ultima atualizacao de atendimento registrada pelo
-    // administrador na ocorrencia; sem ela, vai um texto padrao.
+    // A "Resposta da Prefeitura" e exatamente o que a secretaria escreveu ao
+    // concluir. Atualizacoes anteriores de andamento nunca entram aqui: elas
+    // ja foram avisadas na hora, e o cidadao receberia um texto velho.
     const respostaDaPrefeitura = (incident?.respostaConclusao || '').toString().trim()
-      || (incident?.workUpdate || '').toString().trim()
       || 'O atendimento da sua solicitação foi concluído pelo setor responsável.';
     const linkAvaliacao = incident?.avaliacaoToken ? `${SITE_URL}/avaliar.html?t=${encodeURIComponent(incident.avaliacaoToken)}` : '';
 
@@ -462,14 +500,14 @@ function comTempoLimite(promessa, ms, motivo) {
 
 // Dispara e-mail e WhatsApp em paralelo, cada um com o seu limite de tempo.
 // Nunca rejeita: devolve o resultado de cada canal.
-async function enviarNotificacao(eventType, incident, actor, previousStatus, newStatus) {
+async function enviarNotificacao(eventType, incident, actor, previousStatus, newStatus, detalhe = '') {
   const recipientEmail = incident?.email || '';
   const recipientPhone = incident?.phone || '';
   if (!incident || (!recipientEmail && !recipientPhone)) {
     return { ok: false, email: { sent: false, reason: 'Sem contato.' }, whatsapp: { sent: false, reason: 'Sem contato.' } };
   }
 
-  const composed = buildNotificationText(eventType, incident, actor, previousStatus, newStatus);
+  const composed = buildNotificationText(eventType, incident, actor, previousStatus, newStatus, detalhe);
 
   const [emailResult, whatsappResult] = await Promise.all([
     comTempoLimite(
@@ -710,6 +748,11 @@ function definicoesDeTemplates() {
       titulo: 'Solicitação em andamento',
       corpo: 'Olá, {{1}}! Temos uma atualização sobre sua solicitação.\n\nSolicitação: {{2}}\nLocal: {{3}}\nStatus: Em andamento\n\nSua solicitação já foi encaminhada ao setor responsável e as providências necessárias estão sendo analisadas ou executadas. Você será informado quando o atendimento for concluído.\n\n' + assinatura,
       exemplos: { 1: 'Gian', 2: 'Buracos na rua com acúmulo de água', 3: 'Rua Pará, Centro, Ourinhos – SP' }
+    },
+    atualizacao: {
+      titulo: 'Solicitação atualizada',
+      corpo: 'Olá, {{1}}! Temos uma atualização sobre sua solicitação.\n\nSolicitação: {{2}}\n{{3}}\n\nVocê será informado sempre que houver uma nova atualização.\n\n' + assinatura,
+      exemplos: { 1: 'Gian', 2: 'Buracos na rua com acúmulo de água', 3: 'Atualização da equipe: a equipe de pavimentação fará o reparo nesta semana.' }
     },
     concluido: {
       titulo: 'Solicitação concluída',
@@ -1430,6 +1473,37 @@ app.delete('/api/incidentes', auth.exigirAdminSistema, (req, res) => {
   return res.json(incidentes.limpar());
 });
 
+// ---------------------------------------------------- publicacoes da prefeitura
+const { criarPublicacoes } = require('./publicacoes');
+const publicacoes = criarPublicacoes({ diretorioDados: DIRETORIO_DADOS });
+
+// Pagina inicial: so as publicacoes ativas.
+app.get('/api/publicacoes', (req, res) => {
+  return res.json({ publicacoes: publicacoes.publicas() });
+});
+
+app.get('/api/publicacoes/todas', auth.exigirAdminSistema, (req, res) => {
+  return res.json({ publicacoes: publicacoes.listar() });
+});
+
+app.post('/api/publicacoes', auth.exigirAdminSistema, (req, res) => {
+  const resultado = publicacoes.criar(req.body || {}, req.usuario);
+  if (resultado.erro) return res.status(resultado.status).json({ error: resultado.erro });
+  return res.status(201).json(resultado);
+});
+
+app.put('/api/publicacoes/:id', auth.exigirAdminSistema, (req, res) => {
+  const resultado = publicacoes.atualizar(req.params.id, req.body || {}, req.usuario);
+  if (resultado.erro) return res.status(resultado.status).json({ error: resultado.erro });
+  return res.json(resultado);
+});
+
+app.delete('/api/publicacoes/:id', auth.exigirAdminSistema, (req, res) => {
+  const resultado = publicacoes.remover(req.params.id);
+  if (resultado.erro) return res.status(resultado.status).json({ error: resultado.erro });
+  return res.json(resultado);
+});
+
 // Lista em vigor, consultada por qualquer navegador ao abrir o site.
 app.get('/api/config', (req, res) => {
   const config = lerConfiguracao();
@@ -1648,7 +1722,7 @@ Depois classifique a ocorrência usando EXCLUSIVAMENTE uma das categorias desta 
 });
 
 app.post('/api/notify-user', async (req, res) => {
-  const { eventType, incident, actor, previousStatus, newStatus } = req.body || {};
+  const { eventType, incident, actor, previousStatus, newStatus, detalhe } = req.body || {};
   const recipientEmail = incident?.email || '';
   const recipientPhone = incident?.phone || '';
 
@@ -1658,7 +1732,7 @@ app.post('/api/notify-user', async (req, res) => {
     });
   }
 
-  const resultado = await enviarNotificacao(eventType, incident, actor, previousStatus, newStatus);
+  const resultado = await enviarNotificacao(eventType, incident, actor, previousStatus, newStatus, detalhe);
   return res.status(resultado.ok ? 200 : 207).json(resultado);
 });
 

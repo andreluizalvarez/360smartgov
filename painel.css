@@ -705,6 +705,117 @@
   to { opacity: 1; transform: none; }
 }
 
+/* ---------- visao executiva: indicadores do periodo x situacao atual ---------- */
+.exec-tiles {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  margin: 1rem 0 1.25rem;
+}
+
+.exec-tile-grupo {
+  border: 1px solid var(--borda);
+  border-radius: 14px;
+  padding: 0.8rem 0.9rem 0.9rem;
+  background: #fff;
+  min-width: 0;
+}
+
+.exec-tile-grupo h4 {
+  margin: 0 0 0.55rem;
+  font-size: 0.76rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--cinza-texto);
+}
+
+.exec-tile-grupo .prod-tiles {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.6rem;
+  margin: 0;
+}
+
+.pagina-painel .exec-tile-grupo .prod-tile {
+  background: var(--cinza-fundo);
+  padding: 0.7rem 0.8rem;
+}
+
+.exec-tile-grupo .prod-tile .valor {
+  font-size: 1.6rem;
+}
+
+@media (max-width: 900px) {
+  .exec-tiles { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 520px) {
+  .exec-tile-grupo .prod-tiles { grid-template-columns: 1fr; }
+}
+
+/* ---------- publicacoes ---------- */
+.pub-lista .pub-item {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr) auto;
+  gap: 0.9rem;
+  align-items: center;
+}
+
+.pub-lista .pub-item.inativa {
+  opacity: 0.65;
+}
+
+.pub-thumb {
+  display: block;
+  width: 96px;
+  height: 64px;
+  object-fit: cover;
+  border-radius: 8px;
+  background: var(--cinza-fundo);
+}
+
+.pub-info {
+  min-width: 0;
+}
+
+.pub-info strong {
+  display: block;
+}
+
+.pub-info small {
+  color: var(--cinza-texto);
+}
+
+.pub-info p {
+  margin: 0.3rem 0 0;
+  font-size: 0.9rem;
+  color: var(--cinza-texto);
+}
+
+.pub-acoes {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.pub-preview-wrap img {
+  display: block;
+  max-width: 320px;
+  width: 100%;
+  border-radius: 10px;
+  margin-bottom: 0.5rem;
+}
+
+.checkbox-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 500;
+}
+
+@media (max-width: 700px) {
+  .pub-lista .pub-item { grid-template-columns: 1fr; }
+}
+
 /* ---------- visao executiva: listas compactas ---------- */
 .exec-card .rank-list {
   max-height: 330px;

@@ -18,6 +18,7 @@
         </a>
         <nav class="topnav" aria-label="Principal">
           <a href="#registrar">Registrar ocorrência</a>
+          <a href="#publicacoes" data-link-publicacoes hidden>Ações da Prefeitura</a>
           <a href="#como-funciona">Como funciona</a>
           <a class="btn-entrar" href="login.html">Entrar</a>
         </nav>
@@ -258,6 +259,13 @@
       </section>
 
     </main>
+
+    <!-- Preenchida pelo painel (aba Publicacoes); fica oculta sem publicacoes ativas. -->
+    <section class="container publicacoes" id="publicacoes" hidden>
+      <h2>Ações da Prefeitura</h2>
+      <p class="passo-ajuda">Campanhas, serviços e novidades da Prefeitura para você.</p>
+      <div id="publicacoes-lista" class="publicacoes-grade"></div>
+    </section>
 
     <section class="container como-funciona" id="como-funciona">
       <h2>Como funciona?</h2>

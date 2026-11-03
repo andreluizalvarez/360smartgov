@@ -941,6 +941,65 @@
   color: var(--tinta);
 }
 
+/* ---------- publicacoes da prefeitura ---------- */
+.publicacoes {
+  padding: 2rem 1.25rem 1rem;
+}
+
+.publicacoes h2 {
+  margin: 0 0 0.2rem;
+  font-size: 1.5rem;
+}
+
+.publicacoes-grade {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr));
+  gap: 1rem;
+  margin-top: 1rem;
+  align-items: start;
+}
+
+.publicacao-card {
+  background: #fff;
+  border: 1px solid var(--borda);
+  border-radius: 14px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.publicacao-card img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+}
+
+.publicacao-corpo {
+  padding: 1rem 1.1rem 1.2rem;
+  display: grid;
+  gap: 0.45rem;
+}
+
+.publicacao-corpo h3 {
+  margin: 0;
+  font-size: 1.08rem;
+  color: var(--tinta);
+}
+
+.publicacao-corpo p {
+  margin: 0;
+  color: var(--cinza-texto);
+  font-size: 0.93rem;
+  white-space: pre-line;
+}
+
+.publicacao-corpo a {
+  color: var(--azul);
+  font-weight: 600;
+  text-decoration: none;
+}
+
 /* ---------- rodape ---------- */
 .rodape-cidadao {
   background: #fff;

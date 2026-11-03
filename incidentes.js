@@ -99,6 +99,29 @@ function criarIncidentes({ diretorioDados, papelAdminSistema }) {
     fs.renameSync(temporario, ARQUIVO);
   }
 
+  // Ate 03/11/2026 a pagina de avaliacao mostrava as estrelas invertidas: quem
+  // marcava 4 estrelas gravava nota 2 (nota gravada = 6 - nota pretendida).
+  // As notas anteriores a correcao sao espelhadas uma unica vez; o marcador
+  // em avaliacoes-corrigidas.json impede que rode de novo.
+  const MARCADOR_NOTAS = path.join(diretorioDados, 'avaliacoes-corrigidas.json');
+  function corrigirNotasInvertidas() {
+    if (fs.existsSync(MARCADOR_NOTAS)) return 0;
+    const lista = ler();
+    let corrigidas = 0;
+    for (const item of lista) {
+      const nota = Number(item?.avaliacao?.nota);
+      if (item?.avaliacao && Number.isInteger(nota) && nota >= 1 && nota <= 5 && !item.avaliacao.corrigidaEm) {
+        item.avaliacao = { ...item.avaliacao, notaOriginal: nota, nota: 6 - nota, corrigidaEm: new Date().toISOString() };
+        corrigidas += 1;
+      }
+    }
+    if (corrigidas) salvar(lista);
+    fs.mkdirSync(diretorioDados, { recursive: true });
+    fs.writeFileSync(MARCADOR_NOTAS, JSON.stringify({ em: new Date().toISOString(), corrigidas }, null, 2), 'utf8');
+    return corrigidas;
+  }
+  corrigirNotasInvertidas();
+
   function podeVer(usuario, incidente) {
     if (!usuario) return false;
     if (usuario.role === papelAdminSistema) return true;

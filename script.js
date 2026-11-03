@@ -437,8 +437,8 @@ function syncUsersWithCurrentCategories() {
 }
 
 function updateTabVisibilityByRole() {
-  const restrictedTabs = [tabCategories, tabPriorities, tabUsers, tabNotifications, tabExecutive];
-  const restrictedPanels = [panelCategories, panelPriorities, panelUsers, panelNotifications, panelExecutive];
+  const restrictedTabs = [tabCategories, tabPriorities, tabUsers, tabNotifications, tabExecutive, tabPublications];
+  const restrictedPanels = [panelCategories, panelPriorities, panelUsers, panelNotifications, panelExecutive, panelPublications];
 
   if (isSystemAdmin()) {
     restrictedTabs.forEach((tab) => {
@@ -883,6 +883,7 @@ async function carregarConfiguracaoDoServidor() {
 }
 
 carregarConfiguracaoDoServidor();
+carregarPublicacoesDaPrefeitura();
 
 function renderCategoryConfig() {
   if (!categoryList) return;
@@ -1216,29 +1217,42 @@ function showMessage(element, message, isError = false) {
   element.classList.toggle('error', isError);
 }
 
-async function notifyIncidentStatusChange(incident, previousStatus, newStatus) {
+// Avisa o cidadao (e-mail e WhatsApp) sobre uma mudanca na ocorrencia e
+// devolve o resultado por canal, para o painel dizer o que chegou e o que nao.
+async function notificarCidadao(incident, eventType, extras = {}) {
+  // Sem contato nao e erro: so nao ha a quem avisar.
+  if (!incident || (!incident.email && !incident.phone)) return { ok: true, semContato: true };
   try {
     const response = await fetch('/api/notify-user', {
       method: 'POST',
       // O servidor ja limita cada envio; este e o teto do lado do painel.
       signal: AbortSignal.timeout(25000),
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        eventType: 'status_changed',
-        actor: currentAdminUser?.username || 'admin',
-        previousStatus,
-        newStatus,
-        incident
-      })
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ eventType, actor: currentAdminUser?.username || 'admin', incident, ...extras })
     });
-
-    return response.ok;
+    const corpo = await response.json().catch(() => ({}));
+    return { ok: response.ok && corpo.ok !== false, email: corpo.email || null, whatsapp: corpo.whatsapp || null };
   } catch (error) {
-    console.warn('Falha ao enviar notificação de status:', error);
-    return false;
+    console.warn('Falha ao notificar o cidadão:', error);
+    return { ok: false, falha: 'Não foi possível falar com o servidor para notificar o cidadão.' };
   }
+}
+
+async function notifyIncidentStatusChange(incident, previousStatus, newStatus) {
+  return notificarCidadao(incident, 'status_changed', { previousStatus, newStatus });
+}
+
+// Frase curta para o aviso do painel: o que foi enviado e, se falhou, por que.
+function resumoDaNotificacao(resultado, incident) {
+  if (!resultado) return 'Cidadão não notificado.';
+  if (resultado.semContato) return 'O cidadão não informou e-mail nem WhatsApp, então não foi notificado.';
+  if (resultado.falha) return resultado.falha;
+  const canal = (nome, r) => (!r ? null : (r.sent ? nome + ' enviado' : nome + ' não enviado (' + (r.reason || 'motivo desconhecido') + ')'));
+  const partes = [];
+  if (!incident || incident.email) partes.push(canal('E-mail', resultado.email));
+  if (!incident || incident.phone) partes.push(canal('WhatsApp', resultado.whatsapp));
+  const texto = partes.filter(Boolean).join('. ');
+  return texto ? texto + '.' : 'Cidadão não notificado.';
 }
 
 function addPriority() {
@@ -1331,7 +1345,7 @@ async function saveIncidentWorkUpdate(id, workUpdate) {
   }
 
   const now = new Date().toISOString();
-  const noteText = workUpdate || 'Atualização removida pelo administrador.';
+  const noteText = workUpdate;
   const resultado = await atualizarIncidenteNoServidor(id, {
     workUpdate: workUpdate || '',
     workUpdatedBy: currentAdminUser?.username || '',
@@ -1352,9 +1366,15 @@ async function saveIncidentWorkUpdate(id, workUpdate) {
     showMessage(adminMessage, resultado.erro, true);
     return;
   }
+  // O texto salvo passa ao historico; o campo fica em branco para a proxima.
+  const campo = detailPanel?.querySelector('.work-update-input');
+  if (campo) campo.value = '';
   refreshDashboard();
   atualizarDetalheAberto();
-  showMessage(adminMessage, 'Atualização da ocorrência salva com sucesso.', false);
+  showMessage(adminMessage, 'Atualização salva. Notificando o cidadão...', false);
+  const atualizado = normalizeIncident(resultado.incidente) || item;
+  const envio = await notificarCidadao(atualizado, 'work_update', { detalhe: workUpdate });
+  showMessage(adminMessage, 'Atualização salva. ' + resumoDaNotificacao(envio, atualizado), !(envio && envio.ok));
 }
 
 // Primeira letra maiuscula para exibicao (categorias e usuarios sao gravados
@@ -1662,7 +1682,12 @@ function showIncidentDetail(id) {
       selPrio.innerHTML = opcoes.map((p) => `<option value="${escapeHtml(p)}" ${p === atual ? 'selected' : ''}>${escapeHtml(cap(p))}</option>`).join('');
       selPrio.dataset.id = incident.id;
     }
-    if (txt) { txt.value = incident.workUpdate || ''; txt.dataset.id = incident.id; }
+    // Em branco: o que ja foi escrito esta no historico. So preserva o texto
+    // quando o dialogo e redesenhado com a mesma ocorrencia (ex.: mudou a prioridade).
+    if (txt) {
+      if (txt.dataset.id !== incident.id || !detailPanel?.open) txt.value = '';
+      txt.dataset.id = incident.id;
+    }
     if (btn) btn.dataset.id = incident.id;
   }
   if (somenteLeitura) somenteLeitura.hidden = podeAtuar;
@@ -1743,14 +1768,30 @@ if (detailPanel) {
       refreshDashboard();
       atualizarDetalheAberto();
       const donos = secretariasDaCategoria(categoria);
-      showMessage(adminMessage, donos.length ? `Encaminhada para ${donos.join(', ')}.` : 'Categoria alterada, mas nenhuma secretaria atende essa categoria ainda.', !donos.length);
+      const resumoEncaminhamento = donos.length ? `Encaminhada para ${donos.map(cap).join(', ')}.` : 'Categoria alterada, mas nenhuma secretaria atende essa categoria ainda.';
+      showMessage(adminMessage, resumoEncaminhamento + ' Notificando o cidadão...', !donos.length);
+      const encaminhada = normalizeIncident(r.incidente) || item;
+      const envio = await notificarCidadao(encaminhada, 'forwarded', { detalhe: cap(categoria) + (donos.length ? ' (' + donos.map(cap).join(', ') + ')' : '') });
+      showMessage(adminMessage, resumoEncaminhamento + ' ' + resumoDaNotificacao(envio, encaminhada), !donos.length || !(envio && envio.ok));
       return;
     }
     const saveBtn = event.target.closest('.save-work-update-btn');
     if (!saveBtn) return;
     const id = saveBtn.dataset.id || detailPanel.dataset.id;
     const field = detailPanel.querySelector('.work-update-input');
-    saveIncidentWorkUpdate(id, field ? field.value.trim() : '');
+    const textoAtualizacao = field ? field.value.trim() : '';
+    if (!textoAtualizacao) {
+      showMessage(adminMessage, 'Escreva a atualização antes de salvar.', true);
+      field?.focus();
+      return;
+    }
+    if (saveBtn.disabled) return;
+    saveBtn.disabled = true;
+    try {
+      await saveIncidentWorkUpdate(id, textoAtualizacao);
+    } finally {
+      saveBtn.disabled = false;
+    }
   });
   detailPanel.addEventListener('cancel', (event) => { event.preventDefault(); closeIncidentDetail(); });
 }
@@ -2431,12 +2472,13 @@ const concludeMessage = document.getElementById('conclude-message');
 // Abre o dialogo e resolve com o texto digitado, ou null se cancelado.
 function pedirRespostaDeConclusao(incident) {
   if (!concludeModal || typeof concludeModal.showModal !== 'function') {
-    const texto = window.prompt('Descreva ao cidadão o que foi feito (vai no e-mail de conclusão):', incident.workUpdate || '');
+    const texto = window.prompt('Descreva ao cidadão o que foi feito (vai no e-mail de conclusão):', '');
     return Promise.resolve(texto === null ? null : texto.trim());
   }
   return new Promise((resolve) => {
     if (concludeTitle) concludeTitle.textContent = incident.title || 'Ocorrência';
-    if (concludeText) concludeText.value = incident.workUpdate || '';
+    // Sempre em branco: so o que for escrito aqui vai ao cidadao.
+    if (concludeText) concludeText.value = '';
     if (concludeMessage) concludeMessage.textContent = '';
 
     const fechar = (valor) => {
@@ -2581,8 +2623,8 @@ function renderMetas(t) {
   if (!el) return;
   const metas = [
     { valor: t.taxaConclusao, texto: t.taxaConclusao !== null ? t.taxaConclusao + '%' : '—', frac: (t.taxaConclusao || 0) / 100, nome: 'Taxa de conclusão no período', meta: 'Meta: 80%', bom: (t.taxaConclusao || 0) >= 80 },
-    { valor: t.horasMediasConclusao, texto: t.horasMediasConclusao !== null ? (t.horasMediasConclusao / 24).toLocaleString('pt-BR', { maximumFractionDigits: 1 }) : '—', frac: t.horasMediasConclusao !== null ? Math.max(0, 1 - (t.horasMediasConclusao / 24) / 10) : 0, nome: 'Tempo médio de atendimento (dias)', meta: 'Meta: 5 dias', bom: t.horasMediasConclusao !== null && t.horasMediasConclusao / 24 <= 5 },
-    { valor: t.notaMedia, texto: t.notaMedia !== null ? t.notaMedia.toLocaleString('pt-BR') : '—', frac: (t.notaMedia || 0) / 5, nome: 'Nota do cidadão (satisfação)', meta: 'Meta: 4,0', bom: (t.notaMedia || 0) >= 4 }
+    { valor: t.horasMediasConclusao, texto: t.horasMediasConclusao !== null ? (t.horasMediasConclusao / 24).toLocaleString('pt-BR', { maximumFractionDigits: 1 }) : '—', frac: t.horasMediasConclusao !== null ? Math.max(0, 1 - (t.horasMediasConclusao / 24) / 10) : 0, nome: 'Tempo médio de atendimento no período (dias)', meta: 'Meta: 5 dias', bom: t.horasMediasConclusao !== null && t.horasMediasConclusao / 24 <= 5 },
+    { valor: t.notaMedia, texto: t.notaMedia !== null ? t.notaMedia.toLocaleString('pt-BR') : '—', frac: (t.notaMedia || 0) / 5, nome: 'Nota do cidadão (todas as avaliações)', meta: 'Meta: 4,0', bom: (t.notaMedia || 0) >= 4 }
   ];
   const L = Math.PI * 60;
   el.innerHTML = metas.map((m) => `
@@ -2611,15 +2653,21 @@ function renderExecutivo(d) {
     }
   }
   if (execTiles) {
-    const tiles = [
-      [t.noPeriodo, 'ocorrências no período'],
-      [t.abertas, 'em aberto agora (todas as datas)'],
-      [t.taxaConclusao !== null ? t.taxaConclusao + '%' : '—', 'concluídas no período'],
-      [formatarHoras(t.horasMediasConclusao), 'tempo médio de conclusão'],
-      [`${t.atrasadas} · ${t.criticas ?? 0}`, `atrasadas (> ${d.limiteAtrasoDias} dias) · críticas`],
-      [t.notaMedia !== null ? t.notaMedia.toLocaleString('pt-BR') + ' / 5' : '—', `nota do cidadão (${t.avaliacoes})`]
+    const periodoTexto = d.dias > 0 ? `últimos ${d.dias} dias` : 'todo o histórico';
+    const doPeriodo = [
+      [t.noPeriodo, 'ocorrências recebidas'],
+      [t.concluidasNoPeriodo ?? 0, `concluídas no período${t.taxaConclusao !== null ? ' · ' + t.taxaConclusao + '% das recebidas' : ''}`],
+      [formatarHoras(t.horasMediasConclusao), 'tempo médio de conclusão']
     ];
-    execTiles.innerHTML = tiles.map(([v, r]) => `<div class="prod-tile"><span class="valor">${escapeHtml(String(v))}</span><span class="rotulo">${r}</span></div>`).join('');
+    const atual = [
+      [t.abertas, 'em aberto agora'],
+      [`${t.atrasadas} · ${t.criticas ?? 0}`, `atrasadas (> ${d.limiteAtrasoDias} dias) · críticas`],
+      [t.notaMedia !== null ? t.notaMedia.toLocaleString('pt-BR') + ' / 5' : '—', `nota do cidadão (${t.avaliacoes} avaliaç${t.avaliacoes === 1 ? 'ão' : 'ões'})`]
+    ];
+    const tile = ([v, r]) => `<div class="prod-tile"><span class="valor">${escapeHtml(String(v))}</span><span class="rotulo">${r}</span></div>`;
+    execTiles.innerHTML = `
+      <section class="exec-tile-grupo"><h4>No período · ${escapeHtml(periodoTexto)}</h4><div class="prod-tiles">${doPeriodo.map(tile).join('')}</div></section>
+      <section class="exec-tile-grupo"><h4>Situação atual · todas as datas</h4><div class="prod-tiles">${atual.map(tile).join('')}</div></section>`;
   }
   const lista = (el, itens, render) => {
     if (!el) return;
@@ -3231,7 +3279,10 @@ if (incidentList) {
       if (!r.ok) { showMessage(adminMessage, r.erro, true); atualizarDetalheAberto(); return; }
       refreshDashboard();
       atualizarDetalheAberto();
-      showMessage(adminMessage, `Prioridade alterada para "${cap(selPrio.value)}".`, false);
+      showMessage(adminMessage, `Prioridade alterada para "${cap(selPrio.value)}". Notificando o cidadão...`, false);
+      const comPrioridade = normalizeIncident(r.incidente) || item;
+      const envio = await notificarCidadao(comPrioridade, 'priority_changed', { detalhe: cap(selPrio.value) });
+      showMessage(adminMessage, `Prioridade alterada para "${cap(selPrio.value)}". ` + resumoDaNotificacao(envio, comPrioridade), !(envio && envio.ok));
       return;
     }
     const select = event.target.closest('.status-select');
@@ -3281,12 +3332,8 @@ if (incidentList) {
     showMessage(adminMessage, `Status alterado para "${changedIncident?.status || select.value}". Notificando o cidadão...`, false);
 
     if (changedIncident) {
-      const notified = await notifyIncidentStatusChange(changedIncident, previousStatus, changedIncident.status);
-      if (!notified) {
-        showMessage(adminMessage, 'Status salvo, mas a notificação ao cidadão falhou (confira a aba Notificações).', true);
-      } else {
-        showMessage(adminMessage, 'Status salvo e cidadão notificado por e-mail/WhatsApp.', false);
-      }
+      const envio = await notifyIncidentStatusChange(changedIncident, previousStatus, changedIncident.status);
+      showMessage(adminMessage, `Status alterado para "${changedIncident.status}". ` + resumoDaNotificacao(envio, changedIncident), !(envio && envio.ok));
     }
   });
 }
@@ -3345,6 +3392,8 @@ const tabPassword = document.getElementById('tab-password');
 const tabNotifications = document.getElementById('tab-notifications');
 const tabProductivity = document.getElementById('tab-productivity');
 const tabExecutive = document.getElementById('tab-executive');
+const tabPublications = document.getElementById('tab-publications');
+const panelPublications = document.getElementById('panel-publications');
 const panelOccurrences = document.getElementById('panel-occurrences');
 const panelCategories = document.getElementById('panel-categories');
 const panelPriorities = document.getElementById('panel-priorities');
@@ -3356,10 +3405,10 @@ const panelExecutive = document.getElementById('panel-executive');
 
 function switchTab(tab) {
   // reset active
-  [tabOccurrences, tabCategories, tabPriorities, tabUsers, tabPassword, tabNotifications, tabProductivity, tabExecutive].forEach((b) => b && b.classList.remove('active'));
-  [panelOccurrences, panelCategories, panelPriorities, panelUsers, panelPassword, panelNotifications, panelProductivity, panelExecutive].forEach((p) => p && p.classList.add('hidden'));
+  [tabOccurrences, tabCategories, tabPriorities, tabUsers, tabPassword, tabNotifications, tabProductivity, tabExecutive, tabPublications].forEach((b) => b && b.classList.remove('active'));
+  [panelOccurrences, panelCategories, panelPriorities, panelUsers, panelPassword, panelNotifications, panelProductivity, panelExecutive, panelPublications].forEach((p) => p && p.classList.add('hidden'));
 
-  if (!isSystemAdmin() && (tab === 'categories' || tab === 'priorities' || tab === 'users' || tab === 'notifications' || tab === 'executive')) {
+  if (!isSystemAdmin() && (tab === 'categories' || tab === 'priorities' || tab === 'users' || tab === 'notifications' || tab === 'executive' || tab === 'publications')) {
     tab = 'occurrences';
   }
 
@@ -3413,7 +3462,14 @@ function switchTab(tab) {
     panelExecutive.classList.remove('hidden');
     carregarExecutivo();
   }
+  if (tab === 'publications' && tabPublications && panelPublications) {
+    tabPublications.classList.add('active');
+    panelPublications.classList.remove('hidden');
+    carregarPublicacoesAdmin();
+  }
 }
+
+if (tabPublications) tabPublications.addEventListener('click', () => switchTab('publications'));
 
 if (tabOccurrences) tabOccurrences.addEventListener('click', () => switchTab('occurrences'));
 if (tabCategories) tabCategories.addEventListener('click', () => switchTab('categories'));
@@ -3433,6 +3489,7 @@ const TITULOS_PAINEL = {
   priorities: ['Prioridades', 'Níveis de prioridade usados na classificação.'],
   users: ['Usuários', 'Secretarias e administradores com acesso ao painel.'],
   notifications: ['Notificações', 'E-mail e WhatsApp enviados ao cidadão.'],
+  publications: ['Publicações', 'Ações e campanhas da Prefeitura na página inicial.'],
   password: ['Minha senha', 'Troque a senha de acesso ao painel.']
 };
 const switchTabOriginal = switchTab;
@@ -4566,6 +4623,10 @@ function mostrarAviso(texto, erro = false) {
     el.setAttribute('role', 'status');
     document.body.appendChild(el);
   }
+  // Com um <dialog> modal aberto, so o que esta dentro dele fica visivel
+  // (top layer); o aviso entra no dialogo nesses casos.
+  const pai = (typeof detailPanel !== 'undefined' && detailPanel?.open) ? detailPanel : document.body;
+  if (el.parentNode !== pai) pai.appendChild(el);
   el.className = 'aviso-flutuante' + (erro ? ' erro' : '');
   el.textContent = texto;
   el.hidden = false;
@@ -4578,3 +4639,218 @@ showMessage = function (element, message, isError = false) {
   showMessageBase(element, message, isError);
   if (element && element === adminMessage && message) mostrarAviso(message, isError);
 };
+
+// =====================================================================
+// Publicacoes da Prefeitura: secao "Acoes da Prefeitura" na pagina inicial
+// e aba Publicacoes do painel (admin do sistema).
+// =====================================================================
+async function carregarPublicacoesDaPrefeitura() {
+  const secao = document.getElementById('publicacoes');
+  const lista = document.getElementById('publicacoes-lista');
+  if (!secao || !lista) return;
+  try {
+    const resposta = await fetch('/api/publicacoes');
+    if (!resposta.ok) return;
+    const corpo = await resposta.json().catch(() => ({}));
+    const itens = Array.isArray(corpo.publicacoes) ? corpo.publicacoes : [];
+    if (!itens.length) return;
+    lista.innerHTML = itens.map((p) => `
+      <article class="publicacao-card">
+        ${p.imagem ? `<img src="${p.imagem}" alt="" loading="lazy" />` : ''}
+        <div class="publicacao-corpo">
+          <h3>${escapeHtml(p.titulo)}</h3>
+          ${p.texto ? `<p>${escapeHtml(p.texto)}</p>` : ''}
+          ${p.link ? `<a href="${escapeHtml(p.link)}" target="_blank" rel="noopener">Saiba mais</a>` : ''}
+        </div>
+      </article>`).join('');
+    secao.hidden = false;
+    document.querySelectorAll('[data-link-publicacoes]').forEach((a) => { a.hidden = false; });
+  } catch (error) {
+    // Sem publicacoes a secao continua oculta.
+  }
+}
+
+const pubForm = document.getElementById('pub-form');
+const pubLista = document.getElementById('pub-lista');
+const pubMessage = document.getElementById('pub-message');
+let publicacoesAdmin = [];
+let pubEditandoId = null;
+let pubImagemAtual = '';
+
+// Reduz a imagem no navegador (lado maior 1280px, JPEG) antes de enviar.
+function reduzirImagemDaPublicacao(file, maxLado = 1280) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      const escala = Math.min(1, maxLado / Math.max(img.width, img.height));
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, Math.round(img.width * escala));
+      canvas.height = Math.max(1, Math.round(img.height * escala));
+      canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+      URL.revokeObjectURL(url);
+      resolve(canvas.toDataURL('image/jpeg', 0.82));
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Imagem inválida.')); };
+    img.src = url;
+  });
+}
+
+function mostrarPreviewDaPublicacao() {
+  const wrap = document.getElementById('pub-preview-wrap');
+  const img = document.getElementById('pub-preview');
+  if (!wrap || !img) return;
+  wrap.hidden = !pubImagemAtual;
+  img.src = pubImagemAtual || '';
+}
+
+function limparFormularioDePublicacao() {
+  pubEditandoId = null;
+  pubImagemAtual = '';
+  if (pubForm) pubForm.reset();
+  const ativo = document.getElementById('pub-ativo');
+  if (ativo) ativo.checked = true;
+  const titulo = document.getElementById('pub-form-titulo');
+  if (titulo) titulo.textContent = 'Nova publicação';
+  const salvar = document.getElementById('pub-salvar');
+  if (salvar) salvar.textContent = 'Publicar';
+  const cancelar = document.getElementById('pub-cancelar');
+  if (cancelar) cancelar.hidden = true;
+  mostrarPreviewDaPublicacao();
+}
+
+function renderPublicacoesAdmin(lista) {
+  if (!pubLista) return;
+  if (!lista.length) {
+    pubLista.innerHTML = '<li class="vazio">Nenhuma publicação ainda. A seção "Ações da Prefeitura" só aparece na página inicial quando há publicações exibidas.</li>';
+    return;
+  }
+  pubLista.innerHTML = lista.map((p) => `
+    <li class="pub-item ${p.ativo ? '' : 'inativa'}" data-id="${escapeHtml(p.id)}">
+      ${p.imagem ? `<img src="${p.imagem}" alt="" class="pub-thumb" />` : '<span class="pub-thumb" aria-hidden="true"></span>'}
+      <div class="pub-info">
+        <strong>${escapeHtml(p.titulo)}</strong>
+        <small>${p.ativo ? 'Exibida na página inicial' : 'Oculta'} · ${p.criadoEm ? new Date(p.criadoEm).toLocaleDateString('pt-BR') : ''}${p.criadoPor ? ' · por ' + escapeHtml(cap(p.criadoPor)) : ''}</small>
+        ${p.texto ? `<p>${escapeHtml(p.texto.length > 160 ? p.texto.slice(0, 160) + '…' : p.texto)}</p>` : ''}
+      </div>
+      <div class="pub-acoes">
+        <button type="button" class="btn" data-pub-acao="editar">Editar</button>
+        <button type="button" class="btn" data-pub-acao="alternar">${p.ativo ? 'Ocultar' : 'Exibir'}</button>
+        <button type="button" class="btn" data-pub-acao="remover">Remover</button>
+      </div>
+    </li>`).join('');
+}
+
+async function carregarPublicacoesAdmin() {
+  if (!pubLista || !isSystemAdmin()) return;
+  try {
+    const resposta = await apiAutenticada('/api/publicacoes/todas');
+    const corpo = await resposta.json().catch(() => ({}));
+    if (!resposta.ok) {
+      showMessage(pubMessage, corpo.error || 'Não foi possível carregar as publicações.', true);
+      return;
+    }
+    publicacoesAdmin = Array.isArray(corpo.publicacoes) ? corpo.publicacoes : [];
+    renderPublicacoesAdmin(publicacoesAdmin);
+  } catch (error) {
+    showMessage(pubMessage, 'Não foi possível falar com o servidor.', true);
+  }
+}
+
+async function salvarPublicacao(id, dados) {
+  const resposta = await apiAutenticada(id ? '/api/publicacoes/' + encodeURIComponent(id) : '/api/publicacoes', {
+    method: id ? 'PUT' : 'POST',
+    body: JSON.stringify(dados)
+  });
+  const corpo = await resposta.json().catch(() => ({}));
+  return { ok: resposta.ok, erro: corpo.error || 'Não foi possível salvar a publicação.', publicacao: corpo.publicacao };
+}
+
+if (pubForm) {
+  document.getElementById('pub-imagem')?.addEventListener('change', async (event) => {
+    const arquivo = event.target.files?.[0];
+    if (!arquivo) return;
+    try {
+      pubImagemAtual = await reduzirImagemDaPublicacao(arquivo);
+      mostrarPreviewDaPublicacao();
+      showMessage(pubMessage, '', false);
+    } catch (error) {
+      showMessage(pubMessage, 'Não foi possível ler a imagem. Envie um arquivo JPEG ou PNG.', true);
+    }
+  });
+  document.getElementById('pub-remover-imagem')?.addEventListener('click', () => {
+    pubImagemAtual = '';
+    const entrada = document.getElementById('pub-imagem');
+    if (entrada) entrada.value = '';
+    mostrarPreviewDaPublicacao();
+  });
+  document.getElementById('pub-cancelar')?.addEventListener('click', limparFormularioDePublicacao);
+
+  pubForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    if (!ensureSystemAdminAction()) return;
+    const dados = {
+      titulo: document.getElementById('pub-titulo')?.value.trim() || '',
+      texto: document.getElementById('pub-texto')?.value.trim() || '',
+      link: document.getElementById('pub-link')?.value.trim() || '',
+      imagem: pubImagemAtual,
+      ativo: Boolean(document.getElementById('pub-ativo')?.checked)
+    };
+    const botao = document.getElementById('pub-salvar');
+    if (botao) botao.disabled = true;
+    showMessage(pubMessage, 'Salvando...', false);
+    try {
+      const r = await salvarPublicacao(pubEditandoId, dados);
+      if (!r.ok) { showMessage(pubMessage, r.erro, true); return; }
+      showMessage(pubMessage, pubEditandoId ? 'Publicação atualizada.' : (dados.ativo ? 'Publicação criada. Ela já aparece na página inicial.' : 'Publicação criada como oculta.'), false);
+      limparFormularioDePublicacao();
+      await carregarPublicacoesAdmin();
+    } catch (error) {
+      showMessage(pubMessage, 'Não foi possível falar com o servidor.', true);
+    } finally {
+      if (botao) botao.disabled = false;
+    }
+  });
+
+  pubLista?.addEventListener('click', async (event) => {
+    const botao = event.target.closest('[data-pub-acao]');
+    if (!botao || !ensureSystemAdminAction()) return;
+    const id = botao.closest('[data-id]')?.dataset.id;
+    const publicacao = publicacoesAdmin.find((p) => p.id === id);
+    if (!publicacao) return;
+    const acao = botao.dataset.pubAcao;
+    if (acao === 'editar') {
+      pubEditandoId = id;
+      pubImagemAtual = publicacao.imagem || '';
+      document.getElementById('pub-titulo').value = publicacao.titulo || '';
+      document.getElementById('pub-texto').value = publicacao.texto || '';
+      document.getElementById('pub-link').value = publicacao.link || '';
+      document.getElementById('pub-ativo').checked = Boolean(publicacao.ativo);
+      document.getElementById('pub-form-titulo').textContent = 'Editar publicação';
+      document.getElementById('pub-salvar').textContent = 'Salvar alterações';
+      document.getElementById('pub-cancelar').hidden = false;
+      mostrarPreviewDaPublicacao();
+      pubForm.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      return;
+    }
+    botao.disabled = true;
+    try {
+      if (acao === 'alternar') {
+        const r = await salvarPublicacao(id, { ativo: !publicacao.ativo });
+        showMessage(pubMessage, r.ok ? (publicacao.ativo ? 'Publicação oculta da página inicial.' : 'Publicação exibida na página inicial.') : r.erro, !r.ok);
+      }
+      if (acao === 'remover') {
+        if (!window.confirm('Remover a publicação "' + publicacao.titulo + '"?')) return;
+        const resposta = await apiAutenticada('/api/publicacoes/' + encodeURIComponent(id), { method: 'DELETE' });
+        const corpo = await resposta.json().catch(() => ({}));
+        showMessage(pubMessage, resposta.ok ? 'Publicação removida.' : (corpo.error || 'Não foi possível remover.'), !resposta.ok);
+        if (pubEditandoId === id) limparFormularioDePublicacao();
+      }
+      await carregarPublicacoesAdmin();
+    } catch (error) {
+      showMessage(pubMessage, 'Não foi possível falar com o servidor.', true);
+    } finally {
+      botao.disabled = false;
+    }
+  });
+}

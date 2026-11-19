@@ -1010,7 +1010,7 @@ function geocodeAddress(address) {
   if (!window.google || !window.google.maps) return Promise.resolve(null);
   const geocoder = new google.maps.Geocoder();
   return new Promise((resolve) => {
-    geocoder.geocode({ address }, (results, status) => {
+    geocoder.geocode({ address, region: 'br', componentRestrictions: { country: 'BR' } }, (results, status) => {
       if (status === 'OK' && results[0]) {
         const location = results[0].geometry.location;
         resolve({ latitude: location.lat(), longitude: location.lng() });
@@ -2362,6 +2362,7 @@ if (occurrenceForm) {
         return;
       }
       showMessage(formMessage, '', false);
+      limparLocalizacaoDaSessao();
       mostrarSucessoDoWizard(corpo.incidente);
     } catch (error) {
       console.error('Erro ao enviar a ocorrência:', error);
@@ -3634,6 +3635,10 @@ function validarEnderecoManual() {
 });
 
 let enderecoLocalizado = false;
+// Rua preenchida pela localizacao automatica, para saber se o cidadao a trocou.
+let ruaLocalizada = '';
+// O cidadao arrastou o marcador: o ponto escolhido prevalece sobre o endereco digitado.
+let pontoAjustadoNoMapa = false;
 
 function updateAddressMode() {
   if (manualRadio?.checked || enderecoLocalizado) {
@@ -3663,6 +3668,8 @@ if (manualRadio) {
   manualRadio.addEventListener('change', updateAddressMode);
 }
 
+// Coordenadas de uma visita anterior na mesma aba nao valem para uma nova ocorrencia.
+limparLocalizacaoDaSessao();
 updateAddressMode();
 watchGeolocationPermission();
 
@@ -3904,6 +3911,82 @@ async function watchGeolocationPermission() {
   });
 }
 
+// Precisao (em metros) boa o bastante para encerrar a leitura, erro a partir do
+// qual o cidadao e avisado, e tempo maximo de espera por uma leitura melhor.
+const GEO_PRECISAO_BOA_M = 25;
+const GEO_PRECISAO_AVISO_M = 100;
+const GEO_ESPERA_MS = 12000;
+
+// A primeira posicao que o celular devolve costuma vir da rede (Wi-Fi ou torre),
+// com erro de centenas de metros, antes de o GPS travar. Em vez de aceitar essa
+// primeira leitura, observa a posicao por alguns segundos e fica com a mais
+// precisa, encerrando assim que o erro ficar abaixo de GEO_PRECISAO_BOA_M.
+function obterPosicaoPrecisa() {
+  return new Promise((resolve, reject) => {
+    let melhor = null;
+    let watchId = null;
+    let timer = null;
+    let encerrado = false;
+    const concluir = (erro) => {
+      if (encerrado) return;
+      encerrado = true;
+      clearTimeout(timer);
+      if (watchId !== null) navigator.geolocation.clearWatch(watchId);
+      if (melhor) resolve(melhor);
+      else reject(erro || { code: 3, message: 'timeout', PERMISSION_DENIED: 1, POSITION_UNAVAILABLE: 2, TIMEOUT: 3 });
+    };
+    timer = setTimeout(() => concluir(), GEO_ESPERA_MS);
+    watchId = navigator.geolocation.watchPosition((pos) => {
+      if (encerrado) return;
+      console.log('[geo] leitura com erro de', Math.round(pos.coords.accuracy), 'm');
+      if (!melhor || pos.coords.accuracy < melhor.coords.accuracy) melhor = pos;
+      if (pos.coords.accuracy <= GEO_PRECISAO_BOA_M) concluir();
+    }, (err) => {
+      // Permissao negada encerra na hora; outros erros so encerram se nao
+      // houver nenhuma leitura aproveitavel.
+      if (err.code === err.PERMISSION_DENIED || !melhor) concluir(err);
+      else concluir();
+    }, { enableHighAccuracy: true, timeout: GEO_ESPERA_MS, maximumAge: 0 });
+  });
+}
+
+function guardarLocalizacaoNaSessao(lat, lng, accuracy) {
+  sessionStorage.setItem('smartgov360-last-latitude', String(lat));
+  sessionStorage.setItem('smartgov360-last-longitude', String(lng));
+  if (Number.isFinite(accuracy)) sessionStorage.setItem('smartgov360-last-accuracy', String(Math.round(accuracy)));
+  else sessionStorage.removeItem('smartgov360-last-accuracy');
+}
+
+function limparLocalizacaoDaSessao() {
+  ['smartgov360-last-latitude', 'smartgov360-last-longitude', 'smartgov360-last-accuracy']
+    .forEach((chave) => sessionStorage.removeItem(chave));
+  enderecoLocalizado = false;
+  pontoAjustadoNoMapa = false;
+  ruaLocalizada = '';
+}
+
+function precisaoNaSessao() {
+  const valor = Number(sessionStorage.getItem('smartgov360-last-accuracy'));
+  return Number.isFinite(valor) ? valor : 0;
+}
+
+// Preenche os campos com o endereco geocodificado. Com `manterNumero`, o numero
+// digitado pelo cidadao prevalece sobre o da geocodificacao, que pode ser
+// aproximado; so se preenche quando o campo esta vazio.
+function preencherEnderecoLocalizado(result, { manterNumero = false } = {}) {
+  if (cepInput) cepInput.value = result.cep;
+  if (streetInput) streetInput.value = result.street;
+  if (neighborhoodInput) neighborhoodInput.value = result.neighborhood;
+  if (cityInput) cityInput.value = result.city;
+  if (stateInput) stateInput.value = result.state;
+  ruaLocalizada = result.street || '';
+  if (!numberInput) return;
+  const digitado = numberInput.readOnly ? numberInput.value : numberInput.value.trim();
+  if (manterNumero && digitado) return;
+  definirSemNumero(false);
+  numberInput.value = result.number;
+}
+
 // Retorna { ok, denied }: `denied` indica que a falha foi de permissão,
 // o que dispara o popup com as instruções de desbloqueio.
 async function getGeolocationAddress() {
@@ -3914,70 +3997,66 @@ async function getGeolocationAddress() {
 
   showGeoMessage('Obtendo localização...');
 
-  return new Promise((resolve) => {
-    navigator.geolocation.getCurrentPosition(async (pos) => {
-      const { latitude, longitude } = pos.coords;
-      const result = await reverseGeocode(latitude, longitude);
-      if (!result) {
-        showGeoMessage('Não foi possível obter o endereço a partir da localização.', {
-          isError: true,
-          retryLabel: 'Tentar novamente'
-        });
-        return resolve({ ok: false, denied: false });
-      }
+  let pos;
+  try {
+    pos = await obterPosicaoPrecisa();
+  } catch (err) {
+    console.log('[geo] falha:', err.code, err.message);
 
-      if (cepInput) cepInput.value = result.cep;
-      if (streetInput) streetInput.value = result.street;
-      if (neighborhoodInput) neighborhoodInput.value = result.neighborhood;
-      if (cityInput) cityInput.value = result.city;
-      if (stateInput) stateInput.value = result.state;
+    if (err.code === err.PERMISSION_DENIED) {
+      // A mensagem detalhada fica a cargo do popup de desbloqueio.
+      showGeoMessage('Permissão de localização negada.', { isError: true });
+      return { ok: false, denied: true };
+    }
 
-      // O numero digitado pelo cidadao prevalece sobre o da geocodificacao,
-      // que pode ser aproximado; so se preenche quando o campo esta vazio.
-      if (numberInput) {
-        const digitado = numberInput.readOnly ? numberInput.value : numberInput.value.trim();
-        if (!digitado) {
-          definirSemNumero(false);
-          numberInput.value = result.number;
-        }
-      }
+    if (err.code === err.TIMEOUT) {
+      showGeoMessage('Tempo esgotado ao obter a localização.', {
+        isError: true,
+        retryLabel: 'Tentar novamente'
+      });
+    } else {
+      showGeoMessage('Não foi possível obter sua localização. Preencha o endereço manualmente.', {
+        isError: true,
+        retryLabel: 'Tentar novamente'
+      });
+    }
+    return { ok: false, denied: false };
+  }
 
-      sessionStorage.setItem('smartgov360-last-latitude', String(latitude));
-      sessionStorage.setItem('smartgov360-last-longitude', String(longitude));
+  const { latitude, longitude, accuracy } = pos.coords;
+  const result = await reverseGeocode(latitude, longitude);
+  if (!result) {
+    showGeoMessage('Não foi possível obter o endereço a partir da localização.', {
+      isError: true,
+      retryLabel: 'Tentar novamente'
+    });
+    return { ok: false, denied: false };
+  }
 
-      // Mostra o endereco localizado para conferencia, com o numero editavel.
-      enderecoLocalizado = true;
-      updateAddressMode();
-      const semNumero = numberInput && !numberInput.value.trim();
-      showGeoMessage(semNumero
-        ? 'Localização obtida. Confira o endereço e informe o número.'
-        : 'Endereço preenchido pela sua localização. Confira os dados antes de enviar.');
-      if (semNumero && numberInput) numberInput.focus();
-      resolve({ ok: true, denied: false });
-    }, (err) => {
-      console.log('[geo] falha:', err.code, err.message);
+  preencherEnderecoLocalizado(result, { manterNumero: true });
+  guardarLocalizacaoNaSessao(latitude, longitude, accuracy);
+  pontoAjustadoNoMapa = false;
 
-      if (err.code === err.PERMISSION_DENIED) {
-        // A mensagem detalhada fica a cargo do popup de desbloqueio.
-        showGeoMessage('Permissão de localização negada.', { isError: true });
-        resolve({ ok: false, denied: true });
-        return;
-      }
+  // Mostra o endereco localizado para conferencia, com o numero editavel.
+  enderecoLocalizado = true;
+  updateAddressMode();
+  const semNumero = numberInput && !numberInput.value.trim();
+  const aproximada = Number.isFinite(accuracy) && accuracy > GEO_PRECISAO_AVISO_M;
+  if (aproximada) {
+    showGeoMessage(`Localização aproximada (erro de cerca de ${Math.round(accuracy)} m). Confira o endereço e arraste o marcador no mapa até o ponto certo.`, {
+      retryLabel: 'Tentar localizar de novo'
+    });
+  } else {
+    showGeoMessage(semNumero
+      ? 'Localização obtida. Confira o endereço e informe o número.'
+      : 'Endereço preenchido pela sua localização. Confira os dados antes de enviar.');
+  }
+  if (semNumero && numberInput) numberInput.focus();
+  return { ok: true, denied: false };
+}
 
-      if (err.code === err.TIMEOUT) {
-        showGeoMessage('Tempo esgotado ao obter a localização.', {
-          isError: true,
-          retryLabel: 'Tentar novamente'
-        });
-      } else {
-        showGeoMessage('Não foi possível obter sua localização. Preencha o endereço manualmente.', {
-          isError: true,
-          retryLabel: 'Tentar novamente'
-        });
-      }
-      resolve({ ok: false, denied: false });
-    }, { enableHighAccuracy: true, timeout: 10000 });
-  });
+function textoComparavel(texto) {
+  return (texto || '').toString().normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
 }
 
 async function reverseGeocodeNominatim(lat, lon) {
@@ -4010,9 +4089,11 @@ function reverseGeocodeGoogle(lat, lon) {
       new google.maps.Geocoder().geocode({ location: { lat, lng: lon } }, (results, status) => {
         if (status !== 'OK' || !results?.length) return resolve(null);
         const temNumero = (r) => (r.address_components || []).some((c) => c.types.includes('street_number'));
-        const melhor = results.find((r) => (r.types || []).includes('street_address') && temNumero(r))
-          || results.find(temNumero)
-          || results[0];
+        // Os resultados vem do mais especifico para o mais generico: o primeiro
+        // endereco com numero e o imovel mais proximo do ponto. Antes, qualquer
+        // resultado com numero servia, mesmo um estabelecimento distante.
+        const ehEndereco = (r) => (r.types || []).some((t) => ['street_address', 'premise', 'subpremise'].includes(t));
+        const melhor = results.find((r) => ehEndereco(r) && temNumero(r)) || results[0];
         const comp = (tipo, curto = false) => {
           const c = (melhor.address_components || []).find((x) => x.types.includes(tipo));
           return c ? (curto ? c.short_name : c.long_name) : '';
@@ -4039,10 +4120,12 @@ async function reverseGeocode(lat, lon) {
   const principal = doGoogle || {};
   const reserva = doNominatim || {};
   const campo = (nome) => (principal[nome] || '').toString().trim() || (reserva[nome] || '').toString().trim();
+  // O numero da fonte reserva so vale se ela estiver falando da mesma rua.
+  const mesmaRua = !principal.street || !reserva.street || textoComparavel(principal.street) === textoComparavel(reserva.street);
   return {
     cep: campo('cep'),
     street: campo('street'),
-    number: campo('number'),
+    number: mesmaRua ? campo('number') : (principal.number || '').toString().trim(),
     neighborhood: campo('neighborhood'),
     city: campo('city'),
     state: campo('state')
@@ -4426,6 +4509,27 @@ function preencherResumoDoWizard() {
 let mapaWizard = null;
 let marcadorWizard = null;
 
+let circuloPrecisaoWizard = null;
+
+// Desenha no mapa o raio de erro informado pelo GPS, para o cidadao ver que o
+// ponto pode estar fora do lugar. Raio pequeno nao e mostrado.
+function atualizarCirculoDePrecisao(lat, lng) {
+  if (!mapaWizard) return;
+  const raio = precisaoNaSessao();
+  if (raio <= GEO_PRECISAO_BOA_M) {
+    if (circuloPrecisaoWizard) circuloPrecisaoWizard.setMap(null);
+    return;
+  }
+  if (!circuloPrecisaoWizard) {
+    circuloPrecisaoWizard = new google.maps.Circle({
+      strokeColor: '#1d4ed8', strokeOpacity: 0.6, strokeWeight: 1,
+      fillColor: '#3b82f6', fillOpacity: 0.12, clickable: false
+    });
+  }
+  circuloPrecisaoWizard.setOptions({ center: { lat, lng }, radius: raio, map: mapaWizard });
+  if (raio > GEO_PRECISAO_AVISO_M) mapaWizard.fitBounds(circuloPrecisaoWizard.getBounds());
+}
+
 function mostrarMapaDoWizard() {
   const el = document.getElementById('wizard-map');
   const dica = document.getElementById('mapa-dica');
@@ -4441,30 +4545,65 @@ function mostrarMapaDoWizard() {
       const pos = marcadorWizard.getPosition();
       const nlat = pos.lat();
       const nlng = pos.lng();
-      sessionStorage.setItem('smartgov360-last-latitude', String(nlat));
-      sessionStorage.setItem('smartgov360-last-longitude', String(nlng));
+      // Ponto escolhido a mao e exato: sem raio de erro, e prevalece sobre
+      // qualquer correcao posterior do endereco digitado.
+      guardarLocalizacaoNaSessao(nlat, nlng, 0);
+      pontoAjustadoNoMapa = true;
+      atualizarCirculoDePrecisao(nlat, nlng);
       showGeoMessage('Atualizando o endereço do ponto marcado...');
       const result = await reverseGeocode(nlat, nlng);
       if (!result) {
         showGeoMessage('Não foi possível obter o endereço deste ponto. Confira os campos abaixo.', { isError: true });
         return;
       }
-      if (cepInput) cepInput.value = result.cep;
-      if (streetInput) streetInput.value = result.street;
-      if (neighborhoodInput) neighborhoodInput.value = result.neighborhood;
-      if (cityInput) cityInput.value = result.city;
-      if (stateInput) stateInput.value = result.state;
-      if (numberInput) {
-        definirSemNumero(false);
-        numberInput.value = result.number;
-      }
+      preencherEnderecoLocalizado(result);
       showGeoMessage(result.number ? 'Endereço atualizado pelo ponto marcado. Confira os dados.' : 'Endereço atualizado. Informe o número.');
     });
   } else {
     mapaWizard.setCenter({ lat, lng });
     marcadorWizard.setPosition({ lat, lng });
   }
+  atualizarCirculoDePrecisao(lat, lng);
 }
+
+function distanciaEmMetros(lat1, lng1, lat2, lng2) {
+  const rad = (g) => g * Math.PI / 180;
+  const dLat = rad(lat2 - lat1);
+  const dLng = rad(lng2 - lng1);
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(rad(lat1)) * Math.cos(rad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return 6371000 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+// Se o cidadao corrigir a rua, ou informar o numero quando a leitura do GPS
+// foi aproximada, o ponto do mapa passa a seguir o endereco digitado. Antes,
+// a coordenada do GPS era enviada mesmo com o endereco corrigido, e o painel
+// mostrava o endereco certo no lugar errado. O marcador arrastado prevalece.
+async function ajustarPontoPeloEnderecoDigitado() {
+  if (!geoRadio?.checked || !enderecoLocalizado || pontoAjustadoNoMapa) return;
+  if (!window.google?.maps?.Geocoder || !temCoordenadasNaSessao()) return;
+  const rua = (streetInput?.value || '').trim();
+  const numero = numberInput && !numberInput.readOnly ? numberInput.value.trim() : '';
+  if (!rua || !numero) return;
+  const ruaAlterada = textoComparavel(rua) !== textoComparavel(ruaLocalizada);
+  if (!ruaAlterada && precisaoNaSessao() <= GEO_PRECISAO_AVISO_M) return;
+
+  const endereco = [rua, numero, cityInput?.value, stateInput?.value]
+    .map((v) => (v || '').toString().trim()).filter(Boolean).join(', ');
+  const coords = await geocodeAddress(endereco);
+  if (!coords) return;
+  const atualLat = Number(sessionStorage.getItem('smartgov360-last-latitude'));
+  const atualLng = Number(sessionStorage.getItem('smartgov360-last-longitude'));
+  // Endereco a mais de 5 km do GPS indica erro de digitacao, nao correcao.
+  if (distanciaEmMetros(atualLat, atualLng, coords.latitude, coords.longitude) > 5000) return;
+
+  guardarLocalizacaoNaSessao(coords.latitude, coords.longitude, 0);
+  mostrarMapaDoWizard();
+  showGeoMessage('Ponto do mapa ajustado para o endereço informado. Confira no mapa e arraste o marcador se preciso.');
+}
+
+[streetInput, numberInput].forEach((campo) => {
+  if (campo) campo.addEventListener('change', ajustarPontoPeloEnderecoDigitado);
+});
 
 // Sempre que a localizacao automatica preencher o endereco, o mapa aparece.
 if (document.getElementById('wizard-map')) {

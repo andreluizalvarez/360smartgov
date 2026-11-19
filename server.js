@@ -225,6 +225,9 @@ async function fotoImpropria(dataUrl) {
 function semCacheParaEstaticos(res, caminho) {
   if (/.(html|js|css)$/i.test(caminho)) res.setHeader('Cache-Control', 'no-cache');
 }
+// O codigo-fonte do aplicativo (pasta mobile/) vive neste repositorio, mas nao
+// faz parte do site: nada dele e servido.
+app.use('/mobile', (req, res) => res.status(404).end());
 app.use(express.static(path.join(__dirname), { setHeaders: semCacheParaEstaticos }));
 // A ocorrencia chega com a foto em base64 no corpo: o limite padrao de 100 kb nao basta.
 app.use(express.json({ limit: '4mb' }));

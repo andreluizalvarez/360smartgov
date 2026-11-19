@@ -19,7 +19,7 @@ Notificações ao cidadão continuam por e-mail e WhatsApp, enviadas pelo servid
 ## Rodar em desenvolvimento
 
 ```bash
-cd mobile
+cd smartgov360
 npm install
 npx expo start
 ```
@@ -66,7 +66,7 @@ Para o link `https://` abrir direto no app (sem perguntar), publique no site:
 ## Estrutura
 
 ```
-mobile/
+smartgov360/
   App.js                       navegação (abas + tela Avaliar) e links
   app.json / app.config.js     identidade, permissões, chave do Maps
   eas.json                     perfis de build

@@ -21,7 +21,10 @@
         "CFBundleAllowMixedLocalizations": true,
         "CFBundleDevelopmentRegion": "pt-BR"
       },
-      "associatedDomains": ["applinks:www.360smartgov.com.br", "applinks:360smartgov.com.br"]
+      "associatedDomains": [
+        "applinks:www.360smartgov.com.br",
+        "applinks:360smartgov.com.br"
+      ]
     },
     "android": {
       "package": "br.com.smartgov360.app",
@@ -41,10 +44,21 @@
           "action": "VIEW",
           "autoVerify": true,
           "data": [
-            { "scheme": "https", "host": "www.360smartgov.com.br", "pathPrefix": "/avaliar.html" },
-            { "scheme": "https", "host": "360smartgov.com.br", "pathPrefix": "/avaliar.html" }
+            {
+              "scheme": "https",
+              "host": "www.360smartgov.com.br",
+              "pathPrefix": "/avaliar.html"
+            },
+            {
+              "scheme": "https",
+              "host": "360smartgov.com.br",
+              "pathPrefix": "/avaliar.html"
+            }
           ],
-          "category": ["BROWSABLE", "DEFAULT"]
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
         }
       ]
     },
@@ -66,6 +80,11 @@
         }
       ],
       "expo-secure-store"
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "d0b14625-020d-4534-a002-216523e0be7f"
+      }
+    }
   }
 }

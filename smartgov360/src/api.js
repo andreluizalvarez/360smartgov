@@ -44,7 +44,8 @@ export async function obterConfiguracao() {
 // A foto vai em base64 dentro de um JSON, como no envio da ocorrencia: o
 // envio como arquivo (multipart) falhava no iPhone antes de chegar ao servidor.
 export async function classificarFoto(base64, categorias, prioridades) {
-  const corpo = JSON.stringify({ photoBase64: base64, categories: categorias, priorities: prioridades });
+  if (!base64) return null;
+  const envio = JSON.stringify({ photoBase64: base64, categories: categorias, priorities: prioridades });
 
   // A analise leva alguns segundos; com sinal fraco, desiste em 60 s em vez
   // de deixar a tela presa. Uma falha de rede tenta mais uma vez.
@@ -56,7 +57,7 @@ export async function classificarFoto(base64, categorias, prioridades) {
       const resposta = await fetch(BASE_URL + '/api/classify-image', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: corpo,
+        body: envio,
         signal: controle.signal
       });
       const corpo = await lerJson(resposta);

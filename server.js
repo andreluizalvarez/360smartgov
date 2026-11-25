@@ -1675,28 +1675,34 @@ app.post('/api/classify-image', upload.single('photo'), async (req, res) => {
     return res.status(500).json({ error: 'OpenAI API key is not configured.' });
   }
 
-  if (!req.file) {
+  // O site manda a foto como arquivo (multipart). O app manda em base64
+  // dentro de um JSON (`photoBase64`): o envio de arquivo por multipart
+  // falhava no iPhone antes de chegar ao servidor.
+  let buffer;
+  let mimetype;
+  if (req.file) {
+    ({ buffer, mimetype } = req.file);
+  } else if (typeof req.body?.photoBase64 === 'string' && req.body.photoBase64) {
+    buffer = Buffer.from(req.body.photoBase64.replace(/^data:[^,]*,/, ''), 'base64');
+    mimetype = 'image/jpeg';
+  }
+  if (!buffer || !buffer.length) {
     return res.status(400).json({ error: 'No photo uploaded.' });
   }
 
-  const { buffer, mimetype } = req.file;
   const base64 = buffer.toString('base64');
   const dataUrl = `data:${mimetype};base64,${base64}`;
 
-  let categories;
-  let priorities;
-
-  try {
-    categories = req.body.categories ? JSON.parse(req.body.categories) : DEFAULT_CATEGORIES;
-  } catch (error) {
-    categories = DEFAULT_CATEGORIES;
-  }
-
-  try {
-    priorities = req.body.priorities ? JSON.parse(req.body.priorities) : DEFAULT_PRIORITIES;
-  } catch (error) {
-    priorities = DEFAULT_PRIORITIES;
-  }
+  const lerLista = (valor, padrao) => {
+    if (Array.isArray(valor)) return valor;
+    try {
+      return valor ? JSON.parse(valor) : padrao;
+    } catch (error) {
+      return padrao;
+    }
+  };
+  let categories = lerLista(req.body?.categories, DEFAULT_CATEGORIES);
+  let priorities = lerLista(req.body?.priorities, DEFAULT_PRIORITIES);
 
   priorities = prioridadesEmVigor(priorities);
   categories = categoriasEmVigor(categories);

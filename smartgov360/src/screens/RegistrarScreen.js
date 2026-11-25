@@ -19,8 +19,9 @@ import {
 export const CHAVE_MEUS_PROTOCOLOS = 'smartgov360.meus-protocolos';
 const FOTO_LADO_MAXIMO = 1024;
 const FOTO_QUALIDADE = 0.75;
-// ~600 KB de imagem: folga sob o limite de upload do servidor (1 MB no nginx).
-const FOTO_BASE64_MAXIMO = 800 * 1024;
+// ~525 KB de imagem em ~700 KB de base64: o JSON inteiro fica abaixo do
+// limite de upload do servidor (1 MB no nginx).
+const FOTO_BASE64_MAXIMO = 700 * 1024;
 const VERSAO_CONSENTIMENTO = '2026-10';
 const CATEGORIA_GENERICA = 'outros';
 
@@ -130,10 +131,11 @@ export default function RegistrarScreen({ navigation }) {
     setMsgFoto({ texto: 'Analisando a foto...', erro: false });
     let resultado;
     try {
-      resultado = await classificarFoto(imagem.uri, config.categorias, config.prioridades);
+      resultado = await classificarFoto(imagem.base64, config.categorias, config.prioridades);
     } catch (error) {
       // Sem resposta do servidor: sinal fraco, sem internet ou tempo esgotado.
-      setMsgFoto({ texto: 'Não foi possível enviar a foto: verifique a conexão com a internet e toque em "Analisar a foto de novo".', erro: true });
+      // O detalhe tecnico entre parenteses ajuda o suporte a identificar a falha.
+      setMsgFoto({ texto: `Não foi possível enviar a foto: verifique a conexão com a internet e toque em "Analisar a foto de novo". (${error?.name || 'Erro'}: ${error?.message || 'sem detalhe'})`, erro: true });
       return;
     } finally {
       setAnalisando(false);

@@ -41,11 +41,10 @@ export async function obterConfiguracao() {
 // Envia a foto para a IA: ela confere se mostra um problema urbano e sugere
 // categoria, prioridade, titulo e descricao. O `fotoToken` devolvido prova,
 // no envio da ocorrencia, que esta mesma foto passou pela verificacao.
-export async function classificarFoto(uri, categorias, prioridades) {
-  const form = new FormData();
-  form.append('photo', { uri, name: 'foto.jpg', type: 'image/jpeg' });
-  form.append('categories', JSON.stringify(categorias));
-  form.append('priorities', JSON.stringify(prioridades));
+// A foto vai em base64 dentro de um JSON, como no envio da ocorrencia: o
+// envio como arquivo (multipart) falhava no iPhone antes de chegar ao servidor.
+export async function classificarFoto(base64, categorias, prioridades) {
+  const corpo = JSON.stringify({ photoBase64: base64, categories: categorias, priorities: prioridades });
 
   // A analise leva alguns segundos; com sinal fraco, desiste em 60 s em vez
   // de deixar a tela presa. Uma falha de rede tenta mais uma vez.
@@ -54,7 +53,12 @@ export async function classificarFoto(uri, categorias, prioridades) {
     const controle = new AbortController();
     const limite = setTimeout(() => controle.abort(), 60000);
     try {
-      const resposta = await fetch(BASE_URL + '/api/classify-image', { method: 'POST', body: form, signal: controle.signal });
+      const resposta = await fetch(BASE_URL + '/api/classify-image', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: corpo,
+        signal: controle.signal
+      });
       const corpo = await lerJson(resposta);
       if (resposta.status === 422) {
         return { rejeitada: true, motivo: corpo.error || 'A foto não foi aceita.' };

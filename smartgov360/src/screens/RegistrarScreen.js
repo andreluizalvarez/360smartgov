@@ -19,6 +19,8 @@ import {
 export const CHAVE_MEUS_PROTOCOLOS = 'smartgov360.meus-protocolos';
 const FOTO_LADO_MAXIMO = 1024;
 const FOTO_QUALIDADE = 0.75;
+// ~600 KB de imagem: folga sob o limite de upload do servidor (1 MB no nginx).
+const FOTO_BASE64_MAXIMO = 800 * 1024;
 const VERSAO_CONSENTIMENTO = '2026-10';
 const CATEGORIA_GENERICA = 'outros';
 
@@ -70,15 +72,29 @@ export default function RegistrarScreen({ navigation }) {
   }, [passo]);
 
   // ------------------------------------------------------------ passo 1: foto
+  // Reduz e comprime a foto. Fotos de rua com muito detalhe (mato, galhos)
+  // podem ficar grandes mesmo reduzidas: se passar do limite, tenta de novo
+  // menor e mais comprimida, ate caber no que o servidor aceita.
   async function reduzirFoto(asset) {
-    const lado = Math.max(asset.width || 0, asset.height || 0);
-    const contexto = ImageManipulator.manipulate(asset.uri);
-    if (lado > FOTO_LADO_MAXIMO) {
-      const escala = FOTO_LADO_MAXIMO / lado;
-      contexto.resize({ width: Math.round(asset.width * escala), height: Math.round(asset.height * escala) });
+    const tentativas = [
+      { lado: FOTO_LADO_MAXIMO, qualidade: FOTO_QUALIDADE },
+      { lado: 900, qualidade: 0.6 },
+      { lado: 720, qualidade: 0.5 }
+    ];
+    let salva = null;
+    for (const t of tentativas) {
+      const lado = Math.max(asset.width || 0, asset.height || 0);
+      const contexto = ImageManipulator.manipulate(asset.uri);
+      if (!lado || lado > t.lado) {
+        const escala = lado ? t.lado / lado : 1;
+        contexto.resize(lado
+          ? { width: Math.round(asset.width * escala), height: Math.round(asset.height * escala) }
+          : { width: t.lado });
+      }
+      const imagem = await contexto.renderAsync();
+      salva = await imagem.saveAsync({ compress: t.qualidade, format: SaveFormat.JPEG, base64: true });
+      if ((salva.base64 || '').length <= FOTO_BASE64_MAXIMO) break;
     }
-    const imagem = await contexto.renderAsync();
-    const salva = await imagem.saveAsync({ compress: FOTO_QUALIDADE, format: SaveFormat.JPEG, base64: true });
     return { uri: salva.uri, base64: salva.base64 };
   }
 
@@ -97,21 +113,31 @@ export default function RegistrarScreen({ navigation }) {
       : await ImagePicker.launchImageLibraryAsync({ ...opcoes, mediaTypes: ['images'] });
     if (resultado.canceled || !resultado.assets?.length) return;
 
+    let reduzida;
     try {
-      const reduzida = await reduzirFoto(resultado.assets[0]);
-      setFoto(reduzida);
-      await analisarFoto(reduzida);
+      reduzida = await reduzirFoto(resultado.assets[0]);
     } catch (error) {
       setMsgFoto({ texto: 'Não foi possível preparar a foto. Tente outra imagem.', erro: true });
+      return;
     }
+    setFoto(reduzida);
+    await analisarFoto(reduzida);
   }
 
   async function analisarFoto(imagem) {
     setAnalise(null);
     setAnalisando(true);
     setMsgFoto({ texto: 'Analisando a foto...', erro: false });
-    const resultado = await classificarFoto(imagem.uri, config.categorias, config.prioridades);
-    setAnalisando(false);
+    let resultado;
+    try {
+      resultado = await classificarFoto(imagem.uri, config.categorias, config.prioridades);
+    } catch (error) {
+      // Sem resposta do servidor: sinal fraco, sem internet ou tempo esgotado.
+      setMsgFoto({ texto: 'Não foi possível enviar a foto: verifique a conexão com a internet e toque em "Analisar a foto de novo".', erro: true });
+      return;
+    } finally {
+      setAnalisando(false);
+    }
     if (resultado?.rejeitada) {
       setFoto(null);
       setMsgFoto({ texto: resultado.motivo, erro: true });

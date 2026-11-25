@@ -1223,11 +1223,10 @@ async function notificarCidadao(incident, eventType, extras = {}) {
   // Sem contato nao e erro: so nao ha a quem avisar.
   if (!incident || (!incident.email && !incident.phone)) return { ok: true, semContato: true };
   try {
-    const response = await fetch('/api/notify-user', {
+    const response = await apiAutenticada('/api/notify-user', {
       method: 'POST',
       // O servidor ja limita cada envio; este e o teto do lado do painel.
       signal: AbortSignal.timeout(25000),
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ eventType, actor: currentAdminUser?.username || 'admin', incident, ...extras })
     });
     const corpo = await response.json().catch(() => ({}));
@@ -1326,6 +1325,24 @@ function renderStats(incidents) {
   pendingCount.textContent = incidents.filter((item) => item.status === 'Recebido').length;
   progressCount.textContent = incidents.filter((item) => item.status === 'Em andamento').length;
   resolvedCount.textContent = incidents.filter((item) => item.status === 'Concluído').length;
+  const lateCount = document.getElementById('late-count');
+  if (lateCount) lateCount.textContent = incidents.filter(estaAtrasada).length;
+}
+
+// Situacao do prazo calculada pelo servidor: o prazo combinado pela
+// secretaria ou, sem ele, 7 dias da abertura.
+function estaAtrasada(item) {
+  return Boolean(item?.situacaoPrazo?.atrasada);
+}
+
+function dataDoPrazo(dia) {
+  const [a, m, d] = (dia || '').split('-');
+  return a && m && d ? `${d}/${m}/${a}` : '';
+}
+
+function textoDoAtraso(item) {
+  const dias = item?.situacaoPrazo?.diasAtraso || 0;
+  return `Atrasada há ${dias} dia${dias === 1 ? '' : 's'}`;
 }
 
 function escapeHtml(value) {
@@ -1468,7 +1485,7 @@ function renderIncidents(incidents) {
         <td>${escapeHtml(cap(item.category || ''))}</td>
         <td class="col-secretaria">${rotuloSecretaria(item.category)}</td>
         <td>${escapeHtml(cap(item.priority || ''))}</td>
-        <td><span class="status-badge" data-status="${escapeHtml(item.status)}">${escapeHtml(item.status)}</span></td>
+        <td><span class="status-badge" data-status="${escapeHtml(item.status)}">${escapeHtml(item.status)}</span>${estaAtrasada(item) ? `<span class="atraso-badge" title="Prazo: ${escapeHtml(dataDoPrazo(item.situacaoPrazo.prazo))}${item.situacaoPrazo.prazoDefinido ? '' : ' (padrão de 7 dias)'}">${textoDoAtraso(item)}</span>` : ''}</td>
         <td class="data">${dataCurta(item.createdAt)}</td>
         <td class="data">${dataCurta(item.updatedAt || item.workUpdatedAt || '') || '—'}</td>
         <td class="seta" aria-hidden="true">›</td>
@@ -1518,7 +1535,9 @@ function aplicarFiltros(incidents) {
   const hoje = new Date().toLocaleDateString('pt-BR');
   const secretaria = isSystemAdmin() ? (filterSecretaria?.value || '') : '';
   return incidents.filter((i) => {
-    if (status && i.status !== status) return false;
+    if (status === '__atrasadas__') {
+      if (!estaAtrasada(i)) return false;
+    } else if (status && i.status !== status) return false;
     if (periodo === 'hoje' && new Date(i.createdAt || 0).toLocaleDateString('pt-BR') !== hoje) return false;
     if (secretaria) {
       const donos = secretariasDaCategoria(i.category);
@@ -1617,6 +1636,22 @@ function showIncidentDetail(id) {
   if (detailEmail) detailEmail.textContent = incident.email ? '· ' + incident.email : '';
   if (detailAddress) detailAddress.textContent = incident.address || `${incident.street || ''} ${incident.number || ''}`;
   if (detailPhone) detailPhone.textContent = incident.phone ? '· ' + incident.phone : '';
+  const prazoInfo = document.getElementById('detail-prazo-info');
+  if (prazoInfo) {
+    const s = incident.situacaoPrazo || {};
+    if (incident.status === 'Concluído') {
+      prazoInfo.textContent = s.prazoDefinido ? `${dataDoPrazo(s.prazo)} (concluída)` : 'Concluída';
+    } else if (s.prazo) {
+      prazoInfo.innerHTML = `${escapeHtml(dataDoPrazo(s.prazo))}${s.prazoDefinido ? '' : ' <small class="muted">(padrão: 7 dias da abertura)</small>'}${s.atrasada ? ` <span class="atraso-badge">${textoDoAtraso(incident)}</span>` : ''}`;
+    } else {
+      prazoInfo.textContent = '—';
+    }
+  }
+  const prazoInput = document.getElementById('detail-prazo');
+  if (prazoInput) {
+    if (prazoInput.dataset.id !== incident.id || !detailPanel?.open) prazoInput.value = incident.prazo || '';
+    prazoInput.dataset.id = incident.id;
+  }
   if (detailDescription) detailDescription.textContent = incident.description || '';
   if (detailWorkUpdate) detailWorkUpdate.textContent = incident.workUpdate || 'Sem atualização registrada.';
   if (detailWorkMeta) {
@@ -1773,6 +1808,41 @@ if (detailPanel) {
       const encaminhada = normalizeIncident(r.incidente) || item;
       const envio = await notificarCidadao(encaminhada, 'forwarded', { detalhe: cap(categoria) + (donos.length ? ' (' + donos.map(cap).join(', ') + ')' : '') });
       showMessage(adminMessage, resumoEncaminhamento + ' ' + resumoDaNotificacao(envio, encaminhada), !donos.length || !(envio && envio.ok));
+      return;
+    }
+    const prazoBtn = event.target.closest('#detail-save-prazo');
+    if (prazoBtn) {
+      const id = detailPanel.dataset.id;
+      const item = getVisibleIncidents(getIncidents()).find((it) => it.id === id);
+      const campo = document.getElementById('detail-prazo');
+      const prazo = (campo?.value || '').trim();
+      if (!item || prazoBtn.disabled) return;
+      if (!prazo) {
+        showMessage(adminMessage, 'Escolha a data do prazo antes de salvar.', true);
+        campo?.focus();
+        return;
+      }
+      const hoje = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
+      if (prazo < hoje) {
+        showMessage(adminMessage, 'O prazo não pode ser uma data que já passou.', true);
+        return;
+      }
+      prazoBtn.disabled = true;
+      try {
+        const r = await atualizarIncidenteNoServidor(id, {
+          prazo,
+          history: [...(Array.isArray(item.history) ? item.history : []), { id: crypto.randomUUID(), type: 'work', text: `Prazo para executar definido: ${dataDoPrazo(prazo)}`, by: currentAdminUser?.username || '', at: new Date().toISOString() }]
+        });
+        if (!r.ok) { showMessage(adminMessage, r.erro, true); return; }
+        refreshDashboard();
+        atualizarDetalheAberto();
+        showMessage(adminMessage, `Prazo definido para ${dataDoPrazo(prazo)}. Notificando o cidadão...`, false);
+        const atualizado = normalizeIncident(r.incidente) || item;
+        const envio = await notificarCidadao(atualizado, 'deadline_set', { detalhe: dataDoPrazo(prazo) });
+        showMessage(adminMessage, `Prazo definido para ${dataDoPrazo(prazo)}. ` + resumoDaNotificacao(envio, atualizado), !(envio && envio.ok));
+      } finally {
+        prazoBtn.disabled = false;
+      }
       return;
     }
     const saveBtn = event.target.closest('.save-work-update-btn');
@@ -2662,7 +2732,7 @@ function renderExecutivo(d) {
     ];
     const atual = [
       [t.abertas, 'em aberto agora'],
-      [`${t.atrasadas} · ${t.criticas ?? 0}`, `atrasadas (> ${d.limiteAtrasoDias} dias) · críticas`],
+      [`${t.atrasadas} · ${t.criticas ?? 0}`, 'atrasadas (fora do prazo) · críticas'],
       [t.notaMedia !== null ? t.notaMedia.toLocaleString('pt-BR') + ' / 5' : '—', `nota do cidadão (${t.avaliacoes} avaliaç${t.avaliacoes === 1 ? 'ão' : 'ões'})`]
     ];
     const tile = ([v, r]) => `<div class="prod-tile"><span class="valor">${escapeHtml(String(v))}</span><span class="rotulo">${r}</span></div>`;
@@ -2927,23 +2997,38 @@ async function carregarProdutividade() {
 
 if (prodPeriod) prodPeriod.addEventListener('change', carregarProdutividade);
 
+// O PDF e aberto por um link temporario gerado no servidor (um endereco
+// comum, nao um blob): o Safari do iPhone e o painel dentro do app nao abriam
+// nem baixavam o arquivo montado pelo JavaScript.
+const dentroDoApp = Boolean(window.ReactNativeWebView);
+
+async function linkDoPdf() {
+  const dias = prodPeriod ? prodPeriod.value : '30';
+  const usuario = isSystemAdmin() && prodExportUser ? prodExportUser.value : '';
+  const resposta = await apiAutenticada('/api/incidentes/produtividade/pdf-link', {
+    method: 'POST',
+    body: JSON.stringify({ dias, ...(usuario ? { usuario } : {}) })
+  });
+  const corpo = await resposta.json().catch(() => ({}));
+  if (!resposta.ok || !corpo.abrir) throw new Error(corpo.error || 'Não foi possível gerar o PDF.');
+  return corpo;
+}
+
 // Abre o PDF em nova aba (com o botao de imprimir do navegador). A aba e
-// aberta no clique, antes do fetch, para o celular nao bloquear como popup.
+// aberta no clique, antes do pedido ao servidor, para o celular nao bloquear
+// como popup. Dentro do app, o PDF abre no navegador do aparelho.
 const prodPrintBtn = document.getElementById('prod-print-pdf');
 if (prodPrintBtn) {
   prodPrintBtn.addEventListener('click', async () => {
     if (!currentAdminUser) return;
-    const dias = prodPeriod ? prodPeriod.value : '30';
-    const usuario = isSystemAdmin() && prodExportUser ? prodExportUser.value : '';
-    const aba = window.open('', '_blank');
+    const aba = dentroDoApp ? null : window.open('', '_blank');
     if (aba) aba.document.write('<p style="font-family:sans-serif;padding:2rem">Gerando o relatório...</p>');
     prodPrintBtn.disabled = true;
     try {
-      const resposta = await apiAutenticada(`/api/incidentes/produtividade/pdf?inline=1&dias=${encodeURIComponent(dias)}${usuario ? '&usuario=' + encodeURIComponent(usuario) : ''}`);
-      if (!resposta.ok) throw new Error('Não foi possível gerar o PDF.');
-      const url = URL.createObjectURL(await resposta.blob());
-      if (aba) aba.location = url; else window.open(url, '_blank');
-      showMessage(prodMessage, 'Relatório aberto em outra aba. Use o botão de imprimir do navegador; esta aba continua no painel.', false);
+      const { abrir } = await linkDoPdf();
+      if (aba) aba.location.href = abrir;
+      else window.location.href = abrir;
+      showMessage(prodMessage, aba ? 'Relatório aberto em outra aba. Use o botão de imprimir do navegador; esta aba continua no painel.' : 'Abrindo o relatório...', false);
     } catch (error) {
       if (aba) aba.close();
       showMessage(prodMessage, error.message || 'Não foi possível falar com o servidor.', true);
@@ -2958,31 +3043,24 @@ const prodExportBtn = document.getElementById('prod-export-pdf');
 if (prodExportBtn) {
   prodExportBtn.addEventListener('click', async () => {
     if (!currentAdminUser) return;
-    const dias = prodPeriod ? prodPeriod.value : '30';
-    const usuario = isSystemAdmin() && prodExportUser ? prodExportUser.value : '';
     prodExportBtn.disabled = true;
     showMessage(prodMessage, 'Gerando o PDF...', false);
     try {
-      const resposta = await apiAutenticada(`/api/incidentes/produtividade/pdf?dias=${encodeURIComponent(dias)}${usuario ? '&usuario=' + encodeURIComponent(usuario) : ''}`);
-      if (!resposta.ok) {
-        const corpo = await resposta.json().catch(() => ({}));
-        showMessage(prodMessage, corpo.error || 'Não foi possível gerar o PDF.', true);
-        return;
+      const { abrir, baixar } = await linkDoPdf();
+      if (dentroDoApp) {
+        // O app entrega o PDF ao navegador do aparelho, que salva e compartilha.
+        window.location.href = abrir;
+      } else {
+        const link = document.createElement('a');
+        link.href = baixar;
+        link.download = '';
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
       }
-      const blob = await resposta.blob();
-      const nome = (resposta.headers.get('Content-Disposition') || '').match(/filename="([^"]+)"/)?.[1]
-        || `produtividade-${new Date().toISOString().slice(0, 10)}.pdf`;
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = nome;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 10000);
-      showMessage(prodMessage, `PDF gerado: ${nome}`, false);
+      showMessage(prodMessage, 'PDF gerado.', false);
     } catch (error) {
-      showMessage(prodMessage, 'Não foi possível falar com o servidor.', true);
+      showMessage(prodMessage, error.message || 'Não foi possível falar com o servidor.', true);
     } finally {
       prodExportBtn.disabled = false;
     }
@@ -4723,30 +4801,6 @@ if (trackForm) {
     document.getElementById('acompanhar')?.scrollIntoView({ block: 'start' });
   }
 }
-
-// ---------- ocorrencias recentes ----------
-const recentList = document.getElementById('recent-list');
-async function carregarRecentes() {
-  if (!recentList) return;
-  try {
-    const resposta = await fetch('/api/incidentes/recentes');
-    const dados = await resposta.json().catch(() => ({}));
-    const lista = dados.incidentes || [];
-    if (!lista.length) {
-      recentList.innerHTML = '<li class="muted">Ainda não há ocorrências registradas.</li>';
-      return;
-    }
-    recentList.innerHTML = lista.map((i) => `
-      <li>
-        <span class="cat-icone">${iconeDaCategoria(i.category)}</span>
-        <div><strong>${escapeHtml(i.title || 'Ocorrência')}</strong><small>#${i.protocolo} · ${escapeHtml(i.neighborhood || i.city || '')} · ${dataCurta(i.createdAt)}</small></div>
-        <span class="chip-status ${classeDoStatus(i.status)}">${escapeHtml(i.status)}</span>
-      </li>`).join('');
-  } catch (error) {
-    recentList.innerHTML = '<li class="muted">Não foi possível carregar.</li>';
-  }
-}
-carregarRecentes();
 
 
 // =====================================================================

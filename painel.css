@@ -248,7 +248,34 @@
 }
 
 .kpi-row {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.kpi-row .kpi-atrasada { border-left-color: #c2410c; }
+.kpi-row .kpi-atrasada .valor { color: #c2410c; }
+
+.pagina-painel .atraso-badge {
+  display: inline-block;
+  margin: 0.25rem 0 0 0.35rem;
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  background: #fdecdf;
+  color: #9a3412;
+  white-space: nowrap;
+}
+
+.pagina-painel .prazo-linha {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.pagina-painel .prazo-linha input[type="date"] {
+  flex: 1;
+  min-width: 10rem;
 }
 
 .kpi-row .prod-tile {

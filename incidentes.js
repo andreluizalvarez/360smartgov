@@ -31,8 +31,14 @@ const LIMITE_CAMPO = 300;
 // Campos que o painel pode alterar depois de aberta a ocorrencia.
 const CAMPOS_EDITAVEIS = [
   'status', 'workUpdate', 'workUpdatedBy', 'workUpdatedAt', 'history',
-  'latitude', 'longitude', 'category', 'priority', 'respostaConclusao'
+  'latitude', 'longitude', 'category', 'priority', 'respostaConclusao', 'prazo'
 ];
+
+// Prazo para executar o servico: a data que a secretaria combinou (campo
+// `prazo`, AAAA-MM-DD) ou, sem ela, PRAZO_PADRAO_DIAS a partir da abertura.
+// Passou do prazo sem concluir, a ocorrencia esta atrasada.
+const PRAZO_PADRAO_DIAS = 7;
+const FORMATO_DIA = /^\d{4}-\d{2}-\d{2}$/;
 
 // Versao do termo de consentimento (LGPD) aceito no formulario.
 const VERSAO_CONSENTIMENTO = '2026-10';
@@ -49,6 +55,28 @@ function diaLocal(iso) {
 function diasDesde(iso, agora = Date.now()) {
   const t = Date.parse(iso || '');
   return Number.isFinite(t) ? Math.max(0, (agora - t) / 86400000) : null;
+}
+
+function somarDias(dia, n) {
+  const [a, m, d] = dia.split('-').map(Number);
+  return new Date(Date.UTC(a, m - 1, d + n)).toISOString().slice(0, 10);
+}
+
+function diferencaEmDias(de, ate) {
+  return Math.round((Date.parse(ate + 'T00:00:00Z') - Date.parse(de + 'T00:00:00Z')) / 86400000);
+}
+
+// { prazo, prazoDefinido, atrasada, diasAtraso } de uma ocorrencia.
+function situacaoDoPrazo(item, agora = Date.now()) {
+  const definido = FORMATO_DIA.test((item && item.prazo) || '');
+  const aberta = diaLocal(item && item.createdAt);
+  const prazo = definido ? item.prazo : (aberta ? somarDias(aberta, PRAZO_PADRAO_DIAS) : '');
+  if (!item || item.status === STATUS_FINAL || !prazo) {
+    return { prazo, prazoDefinido: definido, atrasada: false, diasAtraso: 0 };
+  }
+  const hoje = diaLocal(new Date(agora).toISOString());
+  const diasAtraso = Math.max(0, diferencaEmDias(prazo, hoje));
+  return { prazo, prazoDefinido: definido, atrasada: diasAtraso > 0, diasAtraso };
 }
 
 function texto(valor, limite = LIMITE_CAMPO) {
@@ -129,8 +157,13 @@ function criarIncidentes({ diretorioDados, papelAdminSistema }) {
     return permitidas.has(comparavel(incidente.category));
   }
 
+  // Cada ocorrencia vai ao painel com a situacao do prazo ja calculada.
+  function comPrazo(item) {
+    return { ...item, situacaoPrazo: situacaoDoPrazo(item) };
+  }
+
   function listar(usuario) {
-    return ler().filter((item) => podeVer(usuario, item));
+    return ler().filter((item) => podeVer(usuario, item)).map(comPrazo);
   }
 
   // Aberta pelo cidadao, sem login: o servidor define id, status e data.
@@ -238,6 +271,13 @@ function criarIncidentes({ diretorioDados, papelAdminSistema }) {
       mudancas.respostaConclusao = texto(mudancas.respostaConclusao, LIMITE_TEXTO);
     }
 
+    if (mudancas.prazo !== undefined) {
+      mudancas.prazo = texto(mudancas.prazo);
+      if (mudancas.prazo && !FORMATO_DIA.test(mudancas.prazo)) {
+        return { erro: 'Prazo inválido. Use uma data no formato AAAA-MM-DD.', status: 400 };
+      }
+    }
+
     // Ao concluir: registra quando, e gera o link unico da pesquisa de satisfacao.
     const atual = lista[indice];
     if (mudancas.status === STATUS_FINAL && atual.status !== STATUS_FINAL) {
@@ -247,7 +287,7 @@ function criarIncidentes({ diretorioDados, papelAdminSistema }) {
 
     lista[indice] = { ...atual, ...mudancas, updatedAt: new Date().toISOString() };
     salvar(lista);
-    return { incidente: lista[indice] };
+    return { incidente: comPrazo(lista[indice]) };
   }
 
   // ------------------------------------------------ acompanhamento publico
@@ -519,18 +559,24 @@ function criarIncidentes({ diretorioDados, papelAdminSistema }) {
       criadaEm: dataCurta(i.createdAt),
       atualizadaEm: dataCurta(i.updatedAt || i.createdAt),
       concluidaEm: dataCurta(i.concluidoEm),
-      diasAberta: Math.floor(diasDesde(i.createdAt, agora) || 0)
+      diasAberta: Math.floor(diasDesde(i.createdAt, agora) || 0),
+      ...(() => {
+        const s = situacaoDoPrazo(i, agora);
+        return { prazo: s.prazo, prazoDefinido: s.prazoDefinido, diasAtraso: s.diasAtraso };
+      })()
     });
 
     // Criterios (tambem exibidos no painel):
-    // - atrasada: aberta ha mais de `limiteAtrasoDias` dias (padrao 7);
+    // - atrasada: passou do prazo combinado pela secretaria ou, sem prazo,
+    //   aberta ha mais de `limiteAtrasoDias` dias (padrao 7);
     // - critica: atrasada E (prioridade Alta/Urgente OU aberta ha mais de 15 dias).
     const LIMITE_CRITICA_DIAS = 15;
     const prioridadeAlta = (p) => /urgente|alta/i.test(p || '');
+    const estaAtrasada = (i) => situacaoDoPrazo(i, agora).atrasada;
     const atrasadas = abertas
+      .filter(estaAtrasada)
       .map(resumir)
-      .filter((i) => i.diasAberta >= limiteAtrasoDias)
-      .sort((a, b) => b.diasAberta - a.diasAberta);
+      .sort((a, b) => b.diasAtraso - a.diasAtraso || b.diasAberta - a.diasAberta);
     const criticas = atrasadas
       .filter((i) => prioridadeAlta(i.priority) || i.diasAberta >= LIMITE_CRITICA_DIAS)
       .map((i) => ({
@@ -544,7 +590,7 @@ function criarIncidentes({ diretorioDados, papelAdminSistema }) {
         const permitidas = new Set((u.allowedCategories || []).map(comparavel));
         const suas = todas.filter((i) => permitidas.has(comparavel(i.category)));
         const suasAbertas = suas.filter((i) => i.status !== STATUS_FINAL);
-        const suasAtrasadas = suasAbertas.filter((i) => (diasDesde(i.createdAt, agora) || 0) >= limiteAtrasoDias);
+        const suasAtrasadas = suasAbertas.filter(estaAtrasada);
         const concluidas = suas.filter((i) => i.status === STATUS_FINAL && noPeriodo(i.concluidoEm || i.updatedAt));
         const notas = suas.filter((i) => i.avaliacao).map((i) => Number(i.avaliacao.nota));
         return {
@@ -622,7 +668,7 @@ function criarIncidentes({ diretorioDados, papelAdminSistema }) {
       secretarias,
       hoje: dataCurta(new Date(agora).toISOString()),
       semSecretaria,
-      criterios: { atrasada: 'aberta há mais de ' + limiteAtrasoDias + ' dias', critica: 'atrasada e com prioridade Alta/Urgente, ou aberta há mais de ' + LIMITE_CRITICA_DIAS + ' dias' },
+      criterios: { atrasada: 'passou do prazo combinado pela secretaria ou, sem prazo definido, aberta há mais de ' + limiteAtrasoDias + ' dias', critica: 'atrasada e com prioridade Alta/Urgente, ou aberta há mais de ' + LIMITE_CRITICA_DIAS + ' dias' },
       atrasadas: atrasadas.slice(0, 40),
       criticas: criticas.slice(0, 40),
       recentes: doPeriodo.slice(0, 60).map((i) => ({ ...resumir(i), nota: i.avaliacao?.nota ?? null }))

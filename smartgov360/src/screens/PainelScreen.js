@@ -19,8 +19,9 @@ export default function PainelScreen() {
   const [podeVoltar, setPodeVoltar] = useState(false);
 
   function aoNavegar(pedido) {
-    // Links externos (PDF, politica, sites de terceiros) abrem no navegador.
-    if (!pedido.url.startsWith(BASE_URL)) {
+    // Links externos (politica, sites de terceiros) e os relatorios em PDF
+    // abrem no navegador do aparelho, que mostra, imprime e compartilha.
+    if (!pedido.url.startsWith(BASE_URL) || pedido.url.includes('/produtividade/pdf/')) {
       Linking.openURL(pedido.url).catch(() => {});
       return false;
     }

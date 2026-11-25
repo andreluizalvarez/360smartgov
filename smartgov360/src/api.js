@@ -47,13 +47,30 @@ export async function classificarFoto(uri, categorias, prioridades) {
   form.append('categories', JSON.stringify(categorias));
   form.append('priorities', JSON.stringify(prioridades));
 
-  const resposta = await fetch(BASE_URL + '/api/classify-image', { method: 'POST', body: form });
-  const corpo = await lerJson(resposta);
-  if (resposta.status === 422) {
-    return { rejeitada: true, motivo: corpo.error || 'A foto não foi aceita.' };
+  // A analise leva alguns segundos; com sinal fraco, desiste em 60 s em vez
+  // de deixar a tela presa. Uma falha de rede tenta mais uma vez.
+  let ultimoErro;
+  for (let tentativa = 0; tentativa < 2; tentativa++) {
+    const controle = new AbortController();
+    const limite = setTimeout(() => controle.abort(), 60000);
+    try {
+      const resposta = await fetch(BASE_URL + '/api/classify-image', { method: 'POST', body: form, signal: controle.signal });
+      const corpo = await lerJson(resposta);
+      if (resposta.status === 422) {
+        return { rejeitada: true, motivo: corpo.error || 'A foto não foi aceita.' };
+      }
+      if (resposta.status === 413) {
+        return { rejeitada: true, motivo: 'A foto ficou grande demais para enviar. Tente outra foto.' };
+      }
+      if (!resposta.ok) return null;
+      return corpo;
+    } catch (error) {
+      ultimoErro = error;
+    } finally {
+      clearTimeout(limite);
+    }
   }
-  if (!resposta.ok) return null;
-  return corpo;
+  throw ultimoErro;
 }
 
 // Classificacao pela descricao, usada quando a foto nao trouxe sugestao.
@@ -75,11 +92,6 @@ export async function consultarProtocolo(numero) {
   const { ok, corpo } = await get('/api/protocolo/' + encodeURIComponent(limpo));
   if (!ok) return { erro: corpo.error || 'Protocolo não encontrado.' };
   return { ocorrencia: corpo.ocorrencia };
-}
-
-export async function ocorrenciasRecentes() {
-  const { ok, corpo } = await get('/api/incidentes/recentes');
-  return ok && Array.isArray(corpo.incidentes) ? corpo.incidentes : [];
 }
 
 export async function publicacoesAtivas() {

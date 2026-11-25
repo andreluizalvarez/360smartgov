@@ -347,6 +347,7 @@ function primeiroNome(nome) {
 // (`detalhe`) e usa o template "atualizacao" no WhatsApp.
 const EVENTOS_DE_ATUALIZACAO = {
   work_update: { abertura: 'A equipe responsável registrou uma atualização sobre sua solicitação.', rotulo: 'Atualização da equipe' },
+  deadline_set: { abertura: 'A Prefeitura definiu uma previsão para atender sua solicitação.', rotulo: 'Previsão de conclusão' },
   priority_changed: { abertura: 'A prioridade da sua solicitação foi atualizada pela Prefeitura.', rotulo: 'Prioridade' },
   forwarded: { abertura: 'Sua solicitação foi encaminhada ao setor responsável.', rotulo: 'Setor responsável' }
 };
@@ -873,6 +874,35 @@ function comAnteriorAprovado(novo, antigo) {
   return aprovado ? { ...novo, anterior: aprovado } : novo;
 }
 
+// O status gravado so mudava quando alguem abria a aba Notificacoes: um
+// template ja aprovado pela Meta continuava "pendente" aqui, e o envio caia no
+// anterior (o de conclusao sem o link da avaliacao) ou em texto livre (que o
+// WhatsApp bloqueia fora da janela de 24 h, erro 63016). Antes de enviar,
+// confere no Twilio o template que ainda nao consta como aprovado, no maximo
+// a cada 10 minutos por template.
+const ultimaConsultaTemplate = new Map();
+async function confirmarAprovacaoPendente(chave) {
+  const salvos = lerTemplates();
+  const item = salvos[chave];
+  if (!item?.sid || item.status === 'approved') return;
+  const definicao = definicoesDeTemplates()[chave];
+  if (definicao && templateDesatualizado(item, definicao)) return;
+  const agora = Date.now();
+  if (agora - (ultimaConsultaTemplate.get(chave) || 0) < 10 * 60 * 1000) return;
+  ultimaConsultaTemplate.set(chave, agora);
+  try {
+    const atual = await consultarAprovacaoTemplate(item.sid);
+    if (atual.status && atual.status !== 'desconhecido' && atual.status !== item.status) {
+      item.status = atual.status;
+      item.motivo = atual.motivo;
+      salvarTemplates(salvos);
+      console.log('[whatsapp] Template', chave, 'agora', atual.status);
+    }
+  } catch (error) {
+    console.warn('[whatsapp] Nao foi possivel conferir o template', chave + ':', error.message);
+  }
+}
+
 // Devolve { sid, variaveis } do template a usar, ou null.
 function templateAprovado(chave) {
   const item = lerTemplates()[chave];
@@ -899,6 +929,7 @@ async function sendWhatsAppNotification(toPhone, text, template = null) {
   params.set('To', `whatsapp:${normalizedPhone}`);
 
   // Com template aprovado, a mensagem pode ser a primeira da conversa.
+  if (template?.chave) await confirmarAprovacaoPendente(template.chave);
   const escolhido = template?.chave ? templateAprovado(template.chave) : null;
   let usouTemplate = false;
   if (escolhido) {
@@ -1278,8 +1309,11 @@ app.get('/api/protocolo/:numero', (req, res) => {
   return res.json(resultado);
 });
 
+// A lista publica de ocorrencias recentes foi retirada: o cidadao acompanha
+// so a propria ocorrencia, pelo protocolo. A rota responde vazio para as
+// versoes antigas do site e do app que ainda a chamam.
 app.get('/api/incidentes/recentes', (req, res) => {
-  return res.json({ incidentes: incidentes.recentes(6) });
+  return res.json({ incidentes: [] });
 });
 
 // ------------------------------------------------ pesquisa de satisfacao (publica)
@@ -1451,8 +1485,38 @@ function gerarPdfProdutividade(dados, res) {
   doc.end();
 }
 
+// Link temporario para o PDF. O painel baixava o arquivo com fetch e o abria
+// como blob, o que o Safari do iPhone e o painel dentro do app nao abrem nem
+// baixam. Com o link, o PDF e um endereco comum: abre em qualquer navegador.
+// Vale 5 minutos e carrega o filtro ja autorizado de quem pediu.
+const LINKS_PDF = new Map();
+const VALIDADE_LINK_PDF_MS = 5 * 60 * 1000;
+
+app.post('/api/incidentes/produtividade/pdf-link', auth.exigirAutenticacao, (req, res) => {
+  const agora = Date.now();
+  for (const [chave, link] of LINKS_PDF) if (link.expira < agora) LINKS_PDF.delete(chave);
+  req.query = { ...req.query, ...(req.body || {}) };
+  const filtro = filtroDeProdutividade(req);
+  const chave = require('crypto').randomBytes(24).toString('base64url');
+  LINKS_PDF.set(chave, { ...filtro, expira: agora + VALIDADE_LINK_PDF_MS });
+  const base = `/api/incidentes/produtividade/pdf/${chave}`;
+  return res.json({ abrir: base + '?inline=1', baixar: base });
+});
+
+app.get('/api/incidentes/produtividade/pdf/:chave', (req, res) => {
+  const link = LINKS_PDF.get(req.params.chave);
+  if (!link || link.expira < Date.now()) {
+    return res.status(410).type('text/plain; charset=utf-8').send('Este link do relatório expirou. Volte ao painel e gere o PDF novamente.');
+  }
+  return enviarPdfProdutividade(req, res, link.dias, link.somenteUsuarioId);
+});
+
 app.get('/api/incidentes/produtividade/pdf', auth.exigirAutenticacao, (req, res) => {
   const { dias, somenteUsuarioId } = filtroDeProdutividade(req);
+  return enviarPdfProdutividade(req, res, dias, somenteUsuarioId);
+});
+
+function enviarPdfProdutividade(req, res, dias, somenteUsuarioId) {
   const dados = incidentes.produtividade(auth.listarUsuarios(), dias, { somenteUsuarioId });
   if (somenteUsuarioId) {
     dados.individual = dados.usuarios[0]?.username || null;
@@ -1470,7 +1534,7 @@ app.get('/api/incidentes/produtividade/pdf', auth.exigirAutenticacao, (req, res)
     if (!res.headersSent) res.status(500).json({ error: 'Não foi possível gerar o PDF.' });
     else res.end();
   }
-});
+}
 
 app.delete('/api/incidentes', auth.exigirAdminSistema, (req, res) => {
   return res.json(incidentes.limpar());
@@ -1724,7 +1788,9 @@ Depois classifique a ocorrência usando EXCLUSIVAMENTE uma das categorias desta 
   }
 });
 
-app.post('/api/notify-user', async (req, res) => {
+// So o painel (com sessao) avisa o cidadao: sem login, qualquer um poderia
+// mandar e-mail e WhatsApp em nome da prefeitura.
+app.post('/api/notify-user', auth.exigirAutenticacao, async (req, res) => {
   const { eventType, incident, actor, previousStatus, newStatus, detalhe } = req.body || {};
   const recipientEmail = incident?.email || '';
   const recipientPhone = incident?.phone || '';
@@ -1779,6 +1845,9 @@ async function provisionarTemplatesNaSubida() {
     }
   }
   salvarTemplates(salvos);
+
+  // Atualiza o status de aprovacao de todos (pendente -> aprovado pela Meta).
+  await statusDosTemplates(true);
 }
 
 async function localizarAprovadoNoTwilio(chave, sidAtual) {

@@ -175,8 +175,7 @@ async function esperarServidor() {
         const o = consulta.corpo.ocorrencia;
         ok(o.name === undefined && o.email === undefined && o.phone === undefined && o.photoDataUrl === undefined && o.avaliacaoToken === undefined, 'sem dados pessoais, foto ou token de avaliacao');
         const recentes = await pedir('GET', '/api/incidentes/recentes');
-        ok(recentes.status === 200 && recentes.corpo.incidentes.length === 2 && recentes.corpo.incidentes[0].protocolo === 1002, 'recentes lista as ultimas, mais nova primeiro');
-        ok(recentes.corpo.incidentes[0].photoDataUrl === undefined && recentes.corpo.incidentes[0].name === undefined, 'recentes sem foto nem dados pessoais');
+        ok(recentes.status === 200 && Array.isArray(recentes.corpo.incidentes) && recentes.corpo.incidentes.length === 0, 'nao ha lista publica de ocorrencias recentes');
       }
 
       const fotoInvalida = await pedir('POST', '/api/incidentes', { title: 'x', photoDataUrl: 'http://evil/x.jpg', consentimento: { aceito: true } });
@@ -233,6 +232,22 @@ async function esperarServidor() {
       ok(propria.corpo.incidente.history.length === 1, 'o historico enviado e guardado');
       const etapas = (await pedir('GET', '/api/protocolo/1001')).corpo.ocorrencia.etapas;
       ok(etapas.length === 1 && etapas[0].status === 'Em andamento' && etapas[0].at, 'o acompanhamento publico mostra a etapa com data');
+
+      const semPrazo = propria.corpo.incidente.situacaoPrazo;
+      ok(semPrazo && semPrazo.prazoDefinido === false && /^\d{4}-\d{2}-\d{2}$/.test(semPrazo.prazo) && semPrazo.atrasada === false, 'sem prazo definido, vale o padrao de 7 dias e nao esta atrasada');
+      const prazoInvalido = await pedir('PUT', '/api/incidentes/' + buraco.id, { prazo: '30/11/2026' }, tokenOperador);
+      ok(prazoInvalido.status === 400, 'prazo fora do formato AAAA-MM-DD e recusado');
+      const vencido = new Date(Date.now() - 3 * 86400000).toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
+      const comPrazo = await pedir('PUT', '/api/incidentes/' + buraco.id, { prazo: vencido }, tokenOperador);
+      const sp = comPrazo.corpo.incidente.situacaoPrazo;
+      ok(comPrazo.status === 200 && sp.prazoDefinido && sp.prazo === vencido && sp.atrasada && sp.diasAtraso === 3, 'prazo vencido ha 3 dias: atrasada ha 3 dias');
+      const naLista = (await pedir('GET', '/api/incidentes', null, tokenOperador)).corpo.incidentes.find((i) => i.id === buraco.id);
+      ok(naLista.situacaoPrazo.atrasada && naLista.situacaoPrazo.diasAtraso === 3, 'a lista do painel traz a situacao do prazo');
+      const execAtraso = (await pedir('GET', '/api/incidentes/executivo?dias=30', null, token)).corpo;
+      ok(execAtraso.atrasadas.some((i) => i.id === buraco.id && i.diasAtraso === 3), 'a visao do prefeito conta a atrasada pelo prazo combinado');
+      const futuro = new Date(Date.now() + 5 * 86400000).toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
+      const emDia = await pedir('PUT', '/api/incidentes/' + buraco.id, { prazo: futuro }, tokenOperador);
+      ok(emDia.corpo.incidente.situacaoPrazo.atrasada === false, 'prazo no futuro: em dia');
 
       const removerOutra = await pedir('DELETE', '/api/incidentes/' + poste.id, null, tokenOperador);
       ok(removerOutra.status === 403, 'nao remove ocorrencia de outra categoria');
@@ -311,6 +326,19 @@ async function esperarServidor() {
       ok(pdfIndividual.status === 200 && /produtividade-operador-30dias/.test(pdfIndividual.disposicao), 'PDF individual por secretaria');
       const pdfOperador = await pedirBruto('GET', '/api/incidentes/produtividade/pdf?dias=30', tokenOperador);
       ok(pdfOperador.status === 200 && /produtividade-operador-/.test(pdfOperador.disposicao), 'admin de categoria exporta o proprio PDF');
+      const linkSemToken = await pedir('POST', '/api/incidentes/produtividade/pdf-link', { dias: '30' });
+      ok(linkSemToken.status === 401, 'link do PDF exige login');
+      const link = await pedir('POST', '/api/incidentes/produtividade/pdf-link', { dias: '30', usuario: linha.id }, token);
+      ok(link.status === 200 && /\/pdf\/[\w-]+\?inline=1$/.test(link.corpo.abrir) && /\/pdf\/[\w-]+$/.test(link.corpo.baixar), 'gera links para abrir e baixar');
+      const pdfPorLink = await pedirBruto('GET', link.corpo.abrir);
+      ok(pdfPorLink.status === 200 && /^inline/.test(pdfPorLink.disposicao) && /produtividade-operador-30dias/.test(pdfPorLink.disposicao), 'o link abre o PDF individual sem cabecalho de login');
+      const baixarPorLink = await pedirBruto('GET', link.corpo.baixar);
+      ok(baixarPorLink.status === 200 && /^attachment/.test(baixarPorLink.disposicao), 'o link de baixar entrega como anexo');
+      const linkOperador = await pedir('POST', '/api/incidentes/produtividade/pdf-link', { dias: '30', usuario: 'outro-id' }, tokenOperador);
+      const pdfOperadorLink = await pedirBruto('GET', linkOperador.corpo.abrir);
+      ok(pdfOperadorLink.status === 200 && /produtividade-operador-/.test(pdfOperadorLink.disposicao), 'admin de categoria so gera link do proprio relatorio');
+      const falso = await pedirBruto('GET', '/api/incidentes/produtividade/pdf/inexistente');
+      ok(falso.status === 410, 'link invalido ou expirado responde 410');
 
       console.log('\nVisao executiva');
       {
@@ -385,10 +413,12 @@ async function esperarServidor() {
 
     console.log('\nNotificacao de cada mudanca ao cidadao');
     {
-      const semIncidente = await pedir('POST', '/api/notify-user', { eventType: 'work_update' });
+      const anonimo = await pedir('POST', '/api/notify-user', { eventType: 'work_update', incident: { title: 'x', email: 'alvo@exemplo.com' } });
+      ok(anonimo.status === 401, 'sem login nao dispara e-mail nem WhatsApp');
+      const semIncidente = await pedir('POST', '/api/notify-user', { eventType: 'work_update' }, token);
       ok(semIncidente.status === 400, 'sem ocorrencia ou contato responde 400');
-      for (const eventType of ['work_update', 'priority_changed', 'forwarded', 'status_changed']) {
-        const r = await pedir('POST', '/api/notify-user', { eventType, detalhe: 'Equipe no local', newStatus: 'Concluído', incident: { title: 'Poste', email: 'cidadao@exemplo.com', phone: '14999999999', respostaConclusao: 'Feito.' } });
+      for (const eventType of ['work_update', 'deadline_set', 'priority_changed', 'forwarded', 'status_changed']) {
+        const r = await pedir('POST', '/api/notify-user', { eventType, detalhe: 'Equipe no local', newStatus: 'Concluído', incident: { title: 'Poste', email: 'cidadao@exemplo.com', phone: '14999999999', respostaConclusao: 'Feito.' } }, token);
         ok(r.status === 207 && r.corpo.ok === false && typeof r.corpo.email.reason === 'string' && typeof r.corpo.whatsapp.reason === 'string', eventType + ': sem provedores, devolve o motivo de cada canal');
       }
     }

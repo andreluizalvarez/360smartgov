@@ -82,6 +82,7 @@
               <div class="prod-tile kpi-total"><span class="valor" id="total-count">0</span><span class="rotulo">Total de ocorrências</span></div>
               <div class="prod-tile kpi-recebido"><span class="valor" id="pending-count">0</span><span class="rotulo">Recebidas (aguardando ação)</span></div>
               <div class="prod-tile kpi-andamento"><span class="valor" id="progress-count">0</span><span class="rotulo">Em andamento</span></div>
+              <div class="prod-tile kpi-atrasada"><span class="valor" id="late-count">0</span><span class="rotulo">Atrasadas (passaram do prazo)</span></div>
               <div class="prod-tile kpi-concluido"><span class="valor" id="resolved-count">0</span><span class="rotulo">Concluídas</span></div>
             </div>
 
@@ -94,6 +95,7 @@
                 <option value="">Todos os status</option>
                 <option value="Recebido">Recebido</option>
                 <option value="Em andamento">Em andamento</option>
+                <option value="__atrasadas__">Atrasadas</option>
                 <option value="Concluído">Concluído</option>
               </select>
               <select id="filter-category" aria-label="Categoria"><option value="">Todas as categorias</option></select>
@@ -152,6 +154,7 @@
                     <p><strong>Categoria:</strong> <span id="detail-category"></span> · <strong>Prioridade:</strong> <span id="detail-priority"></span> <small class="muted" title="A prioridade é sugerida automaticamente pela IA a partir da foto e da descrição (risco a pessoas, trânsito e extensão do problema). A secretaria pode ajustar em Atendimento.">(sugerida pela IA)</small></p>
                     <p><strong>Secretaria responsável:</strong> <span id="detail-secretaria"></span></p>
                     <p><strong>Endereço:</strong> <span id="detail-address"></span></p>
+                    <p><strong>Prazo:</strong> <span id="detail-prazo-info"></span></p>
                     <p><strong>Descrição:</strong></p>
                     <p id="detail-description"></p>
                     <p><strong>Cidadão:</strong> <span id="detail-name"></span> <span id="detail-email"></span> <span id="detail-phone"></span></p>
@@ -171,9 +174,16 @@
                     <label for="detail-priority-select">Prioridade</label>
                     <select id="detail-priority-select"></select>
                     <p class="passo-ajuda">Sugerida pela IA a partir da foto e da descrição. Ajuste se a avaliação em campo for diferente.</p>
+                    <label for="detail-prazo">Prazo para executar</label>
+                    <div class="prazo-linha">
+                      <input type="date" id="detail-prazo" />
+                      <button type="button" id="detail-save-prazo" class="btn-azul-contorno">Definir prazo</button>
+                    </div>
+                    <p class="passo-ajuda">Data combinada para concluir o serviço. O cidadão recebe a previsão por e-mail e WhatsApp. Passou da data sem concluir, a ocorrência fica atrasada. Sem prazo definido, conta-se 7 dias a partir da abertura.</p>
                     <label for="detail-work-input">Atualização da equipe</label>
-                    <textarea id="detail-work-input" class="work-update-input" rows="3" placeholder="Descreva o que está sendo feito..."></textarea>
-                    <button type="button" id="detail-save-work" class="btn-azul save-work-update-btn">Salvar atualização</button>
+                    <textarea id="detail-work-input" class="work-update-input" rows="3" placeholder="Ex.: Equipe de poda agendada para quinta-feira de manhã."></textarea>
+                    <p class="passo-ajuda">Para informar o andamento ao cidadão sem mudar o status: uma visita, um agendamento, a espera por material. Cada atualização fica no histórico e é enviada ao cidadão por e-mail e WhatsApp.</p>
+                    <button type="button" id="detail-save-work" class="btn-azul save-work-update-btn">Salvar e avisar o cidadão</button>
                   </section>
                   <p id="detail-readonly" class="detalhe-somente-leitura" hidden>Somente leitura: as atualizações de status e de atendimento são feitas pela secretaria responsável.</p>
                   <section id="detail-forward" class="detalhe-acoes" hidden>
@@ -330,7 +340,7 @@
 
             <div class="exec-grid">
               <section class="exec-card">
-                <h4>Atrasos por secretaria <small class="exec-nota">atrasada = aberta há mais de 7 dias</small></h4>
+                <h4>Atrasos por secretaria <small class="exec-nota">atrasada = passou do prazo combinado ou, sem prazo, aberta há mais de 7 dias</small></h4>
                 <p id="exec-orphans" class="exec-alerta" hidden></p>
                 <ul id="exec-secretariats" class="rank-list"></ul>
               </section>

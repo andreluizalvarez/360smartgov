@@ -1,5 +1,5 @@
-// Acompanhamento pelo numero de protocolo, lista dos protocolos abertos neste
-// aparelho e ocorrencias recentes da cidade, como na pagina inicial do site.
+// Acompanhamento pelo numero de protocolo e lista dos protocolos abertos neste
+// aparelho. Nao ha lista publica de ocorrencias: cada cidadao acompanha so a sua.
 import React, { useCallback, useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -7,7 +7,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { Ajuda, Botao, Campo, Cartao, Etiqueta, Mensagem, Titulo } from '../componentes';
 import { CORES, ESPACO, dataCurta } from '../tema';
-import { consultarProtocolo, ocorrenciasRecentes } from '../api';
+import { consultarProtocolo } from '../api';
 import { CHAVE_MEUS_PROTOCOLOS } from './RegistrarScreen';
 
 function LinhaDoTempo({ o }) {
@@ -58,7 +58,6 @@ export default function AcompanharScreen({ route, navigation }) {
   const [ocorrencia, setOcorrencia] = useState(null);
   const [detalhes, setDetalhes] = useState(false);
   const [meus, setMeus] = useState([]);
-  const [recentes, setRecentes] = useState([]);
 
   const buscar = useCallback(async (valor) => {
     const limpo = (valor || '').toString().replace(/\D/g, '');
@@ -87,7 +86,6 @@ export default function AcompanharScreen({ route, navigation }) {
 
   useFocusEffect(useCallback(() => {
     AsyncStorage.getItem(CHAVE_MEUS_PROTOCOLOS).then((v) => setMeus(JSON.parse(v || '[]'))).catch(() => setMeus([]));
-    ocorrenciasRecentes().then(setRecentes).catch(() => {});
   }, []));
 
   const local = ocorrencia ? [ocorrencia.street, ocorrencia.neighborhood, [ocorrencia.city, ocorrencia.state].filter(Boolean).join(' - ')].filter(Boolean).join(', ') : '';
@@ -146,18 +144,6 @@ export default function AcompanharScreen({ route, navigation }) {
         </Cartao>
       )}
 
-      <Cartao>
-        <Titulo>Ocorrências recentes</Titulo>
-        {recentes.length === 0 ? <Ajuda>Ainda não há ocorrências registradas.</Ajuda> : recentes.map((i) => (
-          <Pressable key={i.protocolo} onPress={() => buscar(String(i.protocolo))} style={s.item}>
-            <View style={{ flex: 1 }}>
-              <Text style={s.itemTitulo}>{i.title || 'Ocorrência'}</Text>
-              <Text style={s.itemSub}>#{i.protocolo} · {i.neighborhood || i.city || ''} · {dataCurta(i.createdAt)}</Text>
-            </View>
-            <Etiqueta status={i.status} />
-          </Pressable>
-        ))}
-      </Cartao>
     </ScrollView>
   );
 }

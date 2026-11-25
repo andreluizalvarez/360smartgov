@@ -1683,6 +1683,11 @@ function registrarFalhaDaFoto(req, status, corpo) {
     agente: (req.headers['user-agent'] || '').slice(0, 80),
     arquivo: req.file ? { mimetype: req.file.mimetype, bytes: req.file.size } : null,
     base64: typeof req.body?.photoBase64 === 'string' ? req.body.photoBase64.length : null,
+    chunked: req.headers['transfer-encoding'] || null,
+    compressao: req.headers['content-encoding'] || null,
+    http: req.httpVersion,
+    chaves: req.body && typeof req.body === 'object' ? Object.keys(req.body).slice(0, 10) : typeof req.body,
+    tipoFoto: typeof req.body?.photoBase64,
     erro: corpo?.error || null,
     detalhe: typeof corpo?.details === 'string' ? corpo.details : (corpo?.details?.message || null)
   });

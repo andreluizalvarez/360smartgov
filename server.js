@@ -1670,7 +1670,37 @@ app.post('/api/classify', async (req, res) => {
   }
 });
 
-app.post('/api/classify-image', upload.single('photo'), async (req, res) => {
+// Diagnostico temporario: as ultimas respostas de erro da analise de foto
+// (so codigo, mensagens e tamanhos; nenhuma imagem nem dado pessoal), para
+// investigar a falha que so acontece com as fotos enviadas pelo app.
+const FALHAS_FOTO = [];
+function registrarFalhaDaFoto(req, status, corpo) {
+  FALHAS_FOTO.unshift({
+    em: new Date().toISOString(),
+    status,
+    tipo: (req.headers['content-type'] || '').split(';')[0],
+    bytes: Number(req.headers['content-length']) || null,
+    agente: (req.headers['user-agent'] || '').slice(0, 80),
+    arquivo: req.file ? { mimetype: req.file.mimetype, bytes: req.file.size } : null,
+    base64: typeof req.body?.photoBase64 === 'string' ? req.body.photoBase64.length : null,
+    erro: corpo?.error || null,
+    detalhe: typeof corpo?.details === 'string' ? corpo.details : (corpo?.details?.message || null)
+  });
+  FALHAS_FOTO.length = Math.min(FALHAS_FOTO.length, 20);
+}
+
+function capturarFalhasDaFoto(req, res, next) {
+  const json = res.json.bind(res);
+  res.json = (corpo) => {
+    if (res.statusCode >= 400) registrarFalhaDaFoto(req, res.statusCode, corpo);
+    return json(corpo);
+  };
+  next();
+}
+
+app.get('/api/diagnostico/foto', (req, res) => res.json({ falhas: FALHAS_FOTO }));
+
+app.post('/api/classify-image', capturarFalhasDaFoto, upload.single('photo'), async (req, res) => {
   if (!OPENAI_API_KEY) {
     return res.status(500).json({ error: 'OpenAI API key is not configured.' });
   }
@@ -1874,6 +1904,16 @@ async function localizarAprovadoNoTwilio(chave, sidAtual) {
   }
   return null;
 }
+
+// Erros de leitura do corpo (JSON invalido, corpo grande demais) da analise de
+// foto entram no diagnostico; os demais seguem o tratamento padrao do Express.
+app.use((err, req, res, next) => {
+  if (req.path !== '/api/classify-image') return next(err);
+  const status = err.status || err.statusCode || 500;
+  const corpo = { error: 'Falha ao ler a foto enviada.', details: `${err.type || err.name}: ${err.message}` };
+  registrarFalhaDaFoto(req, status, corpo);
+  return res.status(status).json(corpo);
+});
 
 app.listen(PORT, () => {
   console.log(`Server listening on port ${PORT}`);
